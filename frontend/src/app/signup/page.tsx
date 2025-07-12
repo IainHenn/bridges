@@ -1,39 +1,38 @@
 "use client"
-import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from 'next/navigation';
 
 
-export default function Home() {
+export default function SignUp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const router = useRouter();
 
-  const signIn = (event: React.FormEvent) => {
+  const renderSignUp = (event: React.FormEvent) => {
     event.preventDefault();
-    fetch("http://localhost:8080/sessions", {
+    fetch("http://localhost:8080/users", {
       method: "POST",
       body: JSON.stringify({ "email": email, "password": password })
     })
       .then(response => {
-        if(response.status == 200){
-          console.log("User exists");
+        if(response.status == 201){
+          console.log("User created");
         } else {
-          console.log(`Failed to login user: ${response.status}`)
+          console.log(`Failed to create user: ${response.status}`)
         }
       })
       .catch(error => {
         console.error("Error:", error);
       });
   }
-  const signUp = () => {
+  const sss = () => {
     router.push('/signup');
   }
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-purple-950">
       <div className="bg-blue-500 rounded-2xl shadow-lg p-8 w-[30%] h-85 text-black">
-          <form className="flex flex-col space-y-6" onClick={signIn}>
+          <form className="flex flex-col space-y-6" onClick={renderSignUp}>
             <div className="flex flex-col space-y-2">
               <label htmlFor="email" className="text-white font-semibold">
               Email
@@ -63,19 +62,12 @@ export default function Home() {
               />
             </div>
             <button
-              type="submit"
-              className="bg-purple-700 hover:bg-purple-800 text-white font-bold py-2 rounded-md transition w-full"
-            >
-              Sign In
-            </button>
-            </form>
-            <button
               type="button"
               className="bg-purple-700 hover:bg-purple-800 text-white font-bold py-2 rounded-md transition w-full mt-4"
-              onClick={signUp}
             >
-              Sign Up
+            Sign Up
             </button>
+            </form>
       </div>
     </div>
   );
