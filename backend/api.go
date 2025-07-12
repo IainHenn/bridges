@@ -44,14 +44,14 @@ func loginUser(c *gin.Context) {
 	err := c.BindJSON(&userReq)
 
 	if err != nil {
-		c.Status(400)
+		c.Status(400) // Bad user request
 		return
 	}
 
 	db, err := getDBAccess()
 
 	if err != nil {
-		c.Status(500)
+		c.Status(500) // Server issue
 		return
 	}
 
@@ -59,8 +59,7 @@ func loginUser(c *gin.Context) {
 	err = row.Scan(&userReq.Email, &userReq.Password)
 
 	if err != nil {
-		fmt.Println("Error finding user!")
-		fmt.Println(err)
+		fmt.Println("Error finding user!") //404 user not found
 		c.Status(404)
 		return
 	}
@@ -81,44 +80,36 @@ func signupUser(c *gin.Context) {
 	err := c.BindJSON(&userReq)
 
 	if err != nil {
-		c.Status(400)
+		c.Status(400) // Bad request from user
 	}
 
 	db, err := getDBAccess()
 
 	if err != nil {
-		c.Status(500)
+		c.Status(500) // Server issue on db
 		return
 	}
-
-	fmt.Println("after db access")
 
 	//If email already exists you shouldn't be able to make multiple accounts
 	row := db.QueryRow("SELECT email FROM users WHERE email = $1", userReq.Email)
 	err = row.Scan(&userReq.Email)
 
-	fmt.Println(userReq.Email)
-	fmt.Println(userReq.Password)
-
 	//If email does not exist
 	if err == sql.ErrNoRows {
 		_, err := db.Exec("INSERT INTO users (email, password) VALUES ($1, $2)", userReq.Email, userReq.Password)
-		fmt.Println("before insert")
 		if err != nil {
-			fmt.Println("Error inserting user:", err)
+			fmt.Println("Error inserting user:", err) // Insertion issue, server error
 			c.Status(500)
 			return
 		}
-		fmt.Println("after insert")
 		c.Status(201)
 		return
 	} else if err != nil {
-		fmt.Println("Error inserting user:", err)
+		fmt.Println("Error inserting user:", err) // Any sort of error, return server issue
 		c.Status(500)
 		return
 	} else {
-		// Entity already exists, entity error
-		c.Status(422)
+		c.Status(422) //Entity already exists, entity error
 		return
 	}
 }

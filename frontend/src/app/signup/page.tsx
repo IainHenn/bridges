@@ -22,8 +22,7 @@ export default function SignUp() {
         }
       })
       .catch(error => {
-      // handle error
-      console.error("Error:", error);
+        console.error("Error:", error);
       });
   }
   const sss = () => {

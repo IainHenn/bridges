@@ -23,8 +23,7 @@ export default function Home() {
         }
       })
       .catch(error => {
-      // handle error
-      console.error("Error:", error);
+        console.error("Error:", error);
       });
   }
   const signUp = () => {
