@@ -10,12 +10,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func loginUser(c *gin.Context) {
-
-	userEmail := c.Query("email")
-	userPassword := c.Query("password")
-
-	// Database access
+func getDBAccess() (*sql.DB, error) {
 	dbUser := os.Getenv("DB_USER")
 	dbPW := os.Getenv("DB_PW")
 	dbHost := os.Getenv("DB_HOST")
@@ -26,15 +21,26 @@ func loginUser(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println("Error opening database:", err)
-		c.Status(500)
-		return
+		return db, err
 	}
 
 	err = db.Ping()
 	if err != nil {
 		fmt.Println("Error connecting to database:", err)
+		return db, err
+	}
+	return db, nil
+}
+
+func loginUser(c *gin.Context) {
+
+	userEmail := c.Query("email")
+	userPassword := c.Query("password")
+
+	db, err := getDBAccess()
+
+	if err != nil {
 		c.Status(500)
-		return
 	}
 
 	// Definition of a user
@@ -62,11 +68,17 @@ func loginUser(c *gin.Context) {
 	c.Status(200)
 }
 
+func signupUser(c *gin.Context) {
+	inputtedEmail := c.Query("inputtedEmail")
+	inputtedPassword := c.Query("inputtedPassword")
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
 	router.Use(cors.Default())
 	router.POST("/sessions", loginUser)
+	router.POST("/users", signupUser)
 	router.Run("localhost:8080")
 	fmt.Println("Running!")
 }
