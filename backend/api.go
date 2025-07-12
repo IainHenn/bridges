@@ -34,34 +34,35 @@ func getDBAccess() (*sql.DB, error) {
 
 func loginUser(c *gin.Context) {
 
-	userEmail := c.Query("email")
-	userPassword := c.Query("password")
+	type User struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	var userReq User
+
+	err := c.BindJSON(&userReq)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
 
 	db, err := getDBAccess()
 
 	if err != nil {
 		c.Status(500)
+		return
 	}
 
-	// Definition of a user
-	type user struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-
-	// Assigning user struct
-	u := user{
-		userEmail,
-		userPassword,
-	}
-
-	//Checking if the user exists, if they don't return
-	row := db.QueryRow("SELECT email, password FROM users WHERE email = ? and password = ?", u.Email, u.Password)
-	err = row.Scan(&u.Email, &u.Password)
+	row := db.QueryRow("SELECT email, password FROM users WHERE email = $1 AND password = $2", userReq.Email, userReq.Password)
+	err = row.Scan(&userReq.Email, &userReq.Password)
 
 	if err != nil {
 		fmt.Println("Error finding user!")
+		fmt.Println(err)
 		c.Status(404)
+		return
 	}
 
 	// If it reaches here then it was a success
@@ -69,8 +70,57 @@ func loginUser(c *gin.Context) {
 }
 
 func signupUser(c *gin.Context) {
-	inputtedEmail := c.Query("inputtedEmail")
-	inputtedPassword := c.Query("inputtedPassword")
+
+	type User struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	var userReq User
+
+	err := c.BindJSON(&userReq)
+
+	if err != nil {
+		c.Status(400)
+	}
+
+	db, err := getDBAccess()
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	fmt.Println("after db access")
+
+	//If email already exists you shouldn't be able to make multiple accounts
+	row := db.QueryRow("SELECT email FROM users WHERE email = $1", userReq.Email)
+	err = row.Scan(&userReq.Email)
+
+	fmt.Println(userReq.Email)
+	fmt.Println(userReq.Password)
+
+	//If email does not exist
+	if err == sql.ErrNoRows {
+		_, err := db.Exec("INSERT INTO users (email, password) VALUES ($1, $2)", userReq.Email, userReq.Password)
+		fmt.Println("before insert")
+		if err != nil {
+			fmt.Println("Error inserting user:", err)
+			c.Status(500)
+			return
+		}
+		fmt.Println("after insert")
+		c.Status(201)
+		return
+	} else if err != nil {
+		fmt.Println("Error inserting user:", err)
+		c.Status(500)
+		return
+	} else {
+		// Entity already exists, entity error
+		c.Status(422)
+		return
+	}
 }
 
 func main() {
