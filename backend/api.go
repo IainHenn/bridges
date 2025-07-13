@@ -14,11 +14,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/pem"
 	"io"
 
 	"crypto/sha256"
+	"encoding/base64"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -160,19 +160,23 @@ func signupUser(c *gin.Context) {
 	err = row.Scan(&userReq.Email)
 
 	//If email does not exist
+	salt := base64.RawStdEncoding.EncodeToString(encryptedKey[:16])
+	nonce := base64.RawStdEncoding.EncodeToString(encryptedKey[16 : 16+12])
+	ciphertext := base64.RawStdEncoding.EncodeToString(encryptedKey[16+12:])
 	if err == sql.ErrNoRows {
-		_, err := db.Exec("INSERT INTO users (email, password, pubkey) VALUES ($1, $2, $3)", userReq.Email, userReq.Password, string(pubPrem))
+		_, err := db.Exec(`INSERT INTO users (
+			email, 
+			password, 
+			pub_key, 
+			encrypted_key, 
+			salt, 
+			nonce)  
+		VALUES ($1, $2, $3, $4, $5, $6)`, userReq.Email, userReq.Password, string(pubPrem), ciphertext, salt, nonce)
 		if err != nil {
 			fmt.Println("Error inserting user:", err) // Insertion issue, server error
 			c.Status(500)
 			return
 		}
-		salt := base64.RawStdEncoding.EncodeToString(encryptedKey[:16])
-		nonce := base64.RawStdEncoding.EncodeToString(encryptedKey[16 : 16+12])
-		ciphertext := base64.RawStdEncoding.EncodeToString(encryptedKey[16+12:])
-		fmt.Println(salt)
-		fmt.Println(nonce)
-		fmt.Println(ciphertext)
 		c.IndentedJSON(201, gin.H{"salt": salt, "nonce": nonce, "ciphertext": ciphertext})
 		return
 	} else if err != nil {
