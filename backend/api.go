@@ -13,12 +13,13 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"io"
 
-	"crypto/sha256"
-	"encoding/base64"
+	"golang.org/x/crypto/bcrypt"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -155,14 +156,20 @@ func signupUser(c *gin.Context) {
 		c.Status(500)
 	}
 
-	//If email already exists you shouldn't be able to make multiple accounts
-	row := db.QueryRow("SELECT email FROM users WHERE email = $1", userReq.Email)
-	err = row.Scan(&userReq.Email)
-
 	//If email does not exist
 	salt := base64.RawStdEncoding.EncodeToString(encryptedKey[:16])
 	nonce := base64.RawStdEncoding.EncodeToString(encryptedKey[16 : 16+12])
 	ciphertext := base64.RawStdEncoding.EncodeToString(encryptedKey[16+12:])
+	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(userReq.Password), 10)
+	if err != nil {
+		c.Status(500)
+	}
+	hashedPassword := string(hashedPasswordBytes)
+
+	//If email already exists you shouldn't be able to make multiple accounts
+	row := db.QueryRow("SELECT email FROM users WHERE email = $1", userReq.Email)
+	err = row.Scan(&userReq.Email)
+
 	if err == sql.ErrNoRows {
 		_, err := db.Exec(`INSERT INTO users (
 			email, 
@@ -171,7 +178,7 @@ func signupUser(c *gin.Context) {
 			encrypted_key, 
 			salt, 
 			nonce)  
-		VALUES ($1, $2, $3, $4, $5, $6)`, userReq.Email, userReq.Password, string(pubPrem), ciphertext, salt, nonce)
+		VALUES ($1, $2, $3, $4, $5, $6)`, userReq.Email, hashedPassword, string(pubPrem), ciphertext, salt, nonce)
 		if err != nil {
 			fmt.Println("Error inserting user:", err) // Insertion issue, server error
 			c.Status(500)
