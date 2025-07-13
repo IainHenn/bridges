@@ -95,6 +95,14 @@ export default function SignUp() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-purple-950">
+      <button
+        type="button"
+        className="absolute left-8 top-8 bg-white w-[3%] h-[6%] font-bold text-purple-700 rounded p-2 hover:bg-gray-200 transition"
+        onClick={() => router.back()}
+        aria-label="Go back"
+      >
+        <img src="/left-arrow.svg" alt="Go back" />
+      </button>
       <div className="bg-blue-500 rounded-2xl shadow-lg p-8 w-[30%] h-85 text-black">
         <div className="flex flex-col space-y-2">
           <label htmlFor="email" className="text-white font-semibold">

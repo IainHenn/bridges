@@ -2,6 +2,7 @@
 import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from 'next/navigation';
+import { RouterContext } from "next/dist/shared/lib/router-context.shared-runtime";
 
 
 export default function Home() {
@@ -22,6 +23,7 @@ export default function Home() {
       .then(response => {
         if(response.status == 200){
           console.log("User exists");
+          router.push('/dashboard');
         } else {
           console.log(`Failed to login user: ${response.status}`)
         }
