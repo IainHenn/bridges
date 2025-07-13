@@ -11,6 +11,10 @@ export default function Home() {
 
   const signIn = (event: React.FormEvent) => {
     event.preventDefault();
+    const form = event.target as HTMLFormElement;
+    setEmail(form.email.value);
+    setPassword(form.password.value);
+    event.preventDefault();
     fetch("http://localhost:8080/sessions", {
       method: "POST",
       body: JSON.stringify({ "email": email, "password": password })
@@ -33,7 +37,7 @@ export default function Home() {
   return (
     <div className="flex items-center justify-center min-h-screen bg-purple-950">
       <div className="bg-blue-500 rounded-2xl shadow-lg p-8 w-[30%] h-85 text-black">
-          <form className="flex flex-col space-y-6" onClick={signIn}>
+          <form className="flex flex-col space-y-6" onSubmit={signIn}>
             <div className="flex flex-col space-y-2">
               <label htmlFor="email" className="text-white font-semibold">
               Email
@@ -41,6 +45,7 @@ export default function Home() {
               <input
               id="email"
               type="email"
+              name="email"
               className="bg-gray-100 text-black placeholder-gray-500 hover:bg-gray-600 hover:placeholder-black rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
               placeholder="Enter your email"
               autoComplete="email"
@@ -54,6 +59,7 @@ export default function Home() {
               </label>
               <input
                 id="password"
+                name="password"
                 type="password"
                 className="bg-gray-100 text-black placeholder-gray-500 hover:bg-gray-600 hover:placeholder-black rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
                 placeholder="Enter your password"
