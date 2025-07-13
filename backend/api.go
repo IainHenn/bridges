@@ -98,8 +98,10 @@ func loginUser(c *gin.Context) {
 		return
 	}
 
-	row := db.QueryRow("SELECT email, password FROM users WHERE email = $1 AND password = $2", userReq.Email, userReq.Password)
-	err = row.Scan(&userReq.Email, &userReq.Password)
+	var hashedPassword string
+
+	row := db.QueryRow("SELECT password FROM users WHERE email = $1", userReq.Email)
+	err = row.Scan(&hashedPassword)
 
 	if err != nil {
 		fmt.Println("Error finding user!") //404 user not found
@@ -107,6 +109,19 @@ func loginUser(c *gin.Context) {
 		return
 	}
 
+	if err == sql.ErrNoRows {
+		c.Status(500)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(userReq.Password))
+
+	if err != nil {
+		c.Status(401)
+		return
+	}
+
+	fmt.Println("this made it here")
 	// If it reaches here then it was a success
 	c.Status(200)
 }
