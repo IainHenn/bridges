@@ -8,7 +8,49 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
+	"io"
+
+	"crypto/sha256"
+
+	"golang.org/x/crypto/pbkdf2"
 )
+
+func encryptPrivateKey(pemBytes []byte, password string) ([]byte, error) {
+	// Derive key from password using PBKDF2
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	key := pbkdf2.Key([]byte(password), salt, 100_000, 32, sha256.New)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	aesGCM, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+
+	nonce := make([]byte, 12)
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+
+	ciphertext := aesGCM.Seal(nonce, nonce, pemBytes, nil)
+
+	// Prepend salt so you can derive key during decryption
+	return append(salt, ciphertext...), nil
+}
 
 func getDBAccess() (*sql.DB, error) {
 	dbUser := os.Getenv("DB_USER")
@@ -90,25 +132,55 @@ func signupUser(c *gin.Context) {
 		return
 	}
 
+	//Create pubkey for user
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+
+	if err != nil {
+		c.Status(500) // private key failed to create
+		return
+	}
+
+	privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+
+	// encryptedKey is salt + nonce + encrypted private key
+	encryptedKey, err := encryptPrivateKey(privBytes, userReq.Password)
+
+	pubBytes := x509.MarshalPKCS1PublicKey(&privateKey.PublicKey)
+	pubPrem := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PUBLIC KEY",
+		Bytes: pubBytes,
+	})
+
+	if err != nil {
+		c.Status(500)
+	}
+
 	//If email already exists you shouldn't be able to make multiple accounts
 	row := db.QueryRow("SELECT email FROM users WHERE email = $1", userReq.Email)
 	err = row.Scan(&userReq.Email)
 
 	//If email does not exist
 	if err == sql.ErrNoRows {
-		_, err := db.Exec("INSERT INTO users (email, password) VALUES ($1, $2)", userReq.Email, userReq.Password)
+		_, err := db.Exec("INSERT INTO users (email, password, pubkey) VALUES ($1, $2, $3)", userReq.Email, userReq.Password, string(pubPrem))
 		if err != nil {
 			fmt.Println("Error inserting user:", err) // Insertion issue, server error
 			c.Status(500)
 			return
 		}
-		c.Status(201)
+		salt := base64.RawStdEncoding.EncodeToString(encryptedKey[:16])
+		nonce := base64.RawStdEncoding.EncodeToString(encryptedKey[16 : 16+12])
+		ciphertext := base64.RawStdEncoding.EncodeToString(encryptedKey[16+12:])
+		fmt.Println(salt)
+		fmt.Println(nonce)
+		fmt.Println(ciphertext)
+		c.IndentedJSON(201, gin.H{"salt": salt, "nonce": nonce, "ciphertext": ciphertext})
 		return
 	} else if err != nil {
 		fmt.Println("Error inserting user:", err) // Any sort of error, return server issue
 		c.Status(500)
 		return
 	} else {
+		fmt.Println(err)
 		c.Status(422) //Entity already exists, entity error
 		return
 	}
