@@ -12,11 +12,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/pem"
 	"io"
 
 	"golang.org/x/crypto/bcrypt"
@@ -129,8 +125,12 @@ func loginUser(c *gin.Context) {
 func signupUser(c *gin.Context) {
 
 	type User struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email        string `json:"email"`
+		Password     string `json:"password"`
+		Salt         string `json:"salt"`
+		Nonce        string `json:"nonce"`
+		EncryptedKey string `json:"encryptedKey"`
+		PublicKey    string `json:"publicKey"`
 	}
 
 	var userReq User
@@ -148,33 +148,6 @@ func signupUser(c *gin.Context) {
 		return
 	}
 
-	//Create pubkey for user
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-
-	if err != nil {
-		c.Status(500) // private key failed to create
-		return
-	}
-
-	privBytes := x509.MarshalPKCS1PrivateKey(privateKey)
-
-	// encryptedKey is salt + nonce + encrypted private key
-	encryptedKey, err := encryptPrivateKey(privBytes, userReq.Password)
-
-	pubBytes := x509.MarshalPKCS1PublicKey(&privateKey.PublicKey)
-	pubPrem := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PUBLIC KEY",
-		Bytes: pubBytes,
-	})
-
-	if err != nil {
-		c.Status(500)
-	}
-
-	//If email does not exist
-	salt := base64.RawStdEncoding.EncodeToString(encryptedKey[:16])
-	nonce := base64.RawStdEncoding.EncodeToString(encryptedKey[16 : 16+12])
-	ciphertext := base64.RawStdEncoding.EncodeToString(encryptedKey[16+12:])
 	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(userReq.Password), 10)
 	if err != nil {
 		c.Status(500)
@@ -193,13 +166,13 @@ func signupUser(c *gin.Context) {
 			encrypted_key, 
 			salt, 
 			nonce)  
-		VALUES ($1, $2, $3, $4, $5, $6)`, userReq.Email, hashedPassword, string(pubPrem), ciphertext, salt, nonce)
+		VALUES ($1, $2, $3, $4, $5, $6)`, userReq.Email, hashedPassword, userReq.PublicKey, userReq.EncryptedKey, userReq.Salt, userReq.Nonce)
 		if err != nil {
 			fmt.Println("Error inserting user:", err) // Insertion issue, server error
 			c.Status(500)
 			return
 		}
-		c.IndentedJSON(201, gin.H{"salt": salt, "nonce": nonce, "ciphertext": ciphertext})
+		c.Status(201)
 		return
 	} else if err != nil {
 		fmt.Println("Error inserting user:", err) // Any sort of error, return server issue

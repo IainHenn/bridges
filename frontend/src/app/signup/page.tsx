@@ -7,6 +7,8 @@ import { decodeReply } from "next/dist/server/app-render/entry-base";
 export default function SignUp() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [validationPhrase, setValidationPhrase] = useState("");
+
   const router = useRouter();
   const [url, setUrl] = useState<string | null>(null);
 
@@ -66,20 +68,84 @@ export default function SignUp() {
 
   const renderSignUp = async (event: React.FormEvent) => {
     event.preventDefault();
+    const encoder = new TextEncoder();
+    const saltBytes = window.crypto.getRandomValues(new Uint8Array(16));
+    const nonceBytes = window.crypto.getRandomValues(new Uint8Array(12));
+
+    // Generate an asymmetric key pair (ECDSA)
+    const keyPair = await window.crypto.subtle.generateKey(
+      {
+      name: "ECDSA",
+      namedCurve: "P-256"
+      },
+      true,
+      ["sign", "verify"]
+    );
+
+    // Export public key as spki (base64)
+    const publicKeyBuffer = await window.crypto.subtle.exportKey("spki", keyPair.publicKey);
+    function arrayBufferToBase64(buffer: ArrayBuffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+      }
+      return window.btoa(binary);
+    }
+    const publicKey = arrayBufferToBase64(publicKeyBuffer);
+
+    // Export private key as pkcs8 (base64)
+    const privateKeyBuffer = await window.crypto.subtle.exportKey("pkcs8", keyPair.privateKey);
+
+    // Derive encryption key from validationPhrase
+    const keyMaterial = await window.crypto.subtle.importKey(
+      "raw",
+      encoder.encode(validationPhrase),
+      "PBKDF2",
+      false,
+      ["deriveKey"]
+    );
+    const key = await window.crypto.subtle.deriveKey(
+      {
+      name: "PBKDF2",
+      salt: saltBytes,
+      iterations: 100000,
+      hash: "SHA-256"
+      },
+      keyMaterial,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt"]
+    );
+
+    // Encrypt the private key using AES-GCM
+    const encryptedKeyBuffer = await window.crypto.subtle.encrypt(
+      {
+      name: "AES-GCM",
+      iv: nonceBytes
+      },
+      key,
+      privateKeyBuffer
+    );
+
+    const salt = arrayBufferToBase64(saltBytes.buffer);
+    const nonce = arrayBufferToBase64(nonceBytes.buffer);
+    const encryptedKey = arrayBufferToBase64(encryptedKeyBuffer);
     try {
       const response = await fetch("http://localhost:8080/users", {
         method: "POST",
-        body: JSON.stringify({ "email": email, "password": password })
+        body: JSON.stringify({ "email": email, 
+          "password": password,
+          "salt": salt,
+          "nonce": nonce,
+          "encryptedKey": encryptedKey,
+          "publicKey": publicKey})
       });
+
       if (response.status === 201) {
-        const result = await response.json();
-        const salt = result['salt'];
-        const encryptedKey = result['ciphertext'];
-        const nonce = result['nonce'];
-        
+        console.log("user created");
         if (encryptedKey && salt && nonce) {
-          const privateKey = await decryptPrivateKey(encryptedKey, password, salt, nonce);
-          console.log(`privateKey: ${privateKey}`);
+          const privateKey = await decryptPrivateKey(encryptedKey, validationPhrase, salt, nonce);
           const blob = new Blob([privateKey], { type: "text/plain" });
           setUrl(URL.createObjectURL(blob));
         }
@@ -131,6 +197,15 @@ export default function SignUp() {
             autoComplete="current-password"
             value={password}
             onChange={e => setPassword(e.target.value)}
+          />
+          <input
+            id="validationPhrase"
+            type="password"
+            className="bg-gray-100 text-black placeholder-gray-500 hover:bg-gray-600 hover:placeholder-black rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
+            placeholder="Enter your validation phrase"
+            autoComplete="current-validation-phrase"
+            value={validationPhrase}
+            onChange={e => setValidationPhrase(e.target.value)}
           />
         </div>
         <button
