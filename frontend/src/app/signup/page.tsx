@@ -61,7 +61,7 @@ export default function SignUp() {
       key,
       encryptedBlob
     );
-    return new TextDecoder().decode(decrypted); // PEM string or DER bytes
+    return new TextDecoder().decode(decrypted); 
   }
 
   const renderSignUp = async (event: React.FormEvent) => {
@@ -79,6 +79,7 @@ export default function SignUp() {
         
         if (encryptedKey && salt && nonce) {
           const privateKey = await decryptPrivateKey(encryptedKey, password, salt, nonce);
+          console.log(`privateKey: ${privateKey}`);
           const blob = new Blob([privateKey], { type: "text/plain" });
           setUrl(URL.createObjectURL(blob));
         }
