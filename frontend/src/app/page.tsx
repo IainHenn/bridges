@@ -10,7 +10,7 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const router = useRouter();
 
-  const signIn = (event: React.FormEvent) => {
+  const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
     const form = event.target as HTMLFormElement;
     setEmail(form.email.value);
@@ -20,9 +20,25 @@ export default function Home() {
       method: "POST",
       body: JSON.stringify({ "email": email, "password": password })
     })
-      .then(response => {
+      .then(async response => {
         if(response.status == 200){
           console.log("User exists");
+          const tokenResponse = await fetch("http://localhost:8080/tokens", {
+            method: "POST",
+            body: JSON.stringify({ "email": email, "password": password })
+          });
+          if(tokenResponse.ok){
+            const tokenData = await tokenResponse.json();
+            // Store token in httpOnly cookie via server (client JS cannot set httpOnly cookies directly)
+            // Send token to an API route that sets the cookie
+            await fetch("/api/set-token-cookie", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: tokenData.token })
+            });
+          } else {
+            console.log("failed to generate user token");
+          }
           router.push('/dashboard');
         } else {
           console.log(`Failed to login user: ${response.status}`)

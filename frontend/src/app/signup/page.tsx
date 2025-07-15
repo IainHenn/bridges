@@ -144,6 +144,7 @@ export default function SignUp() {
 
       if (response.status === 201) {
         console.log("user created");
+
         if (encryptedKey && salt && nonce) {
           const privateKey = await decryptPrivateKey(encryptedKey, validationPhrase, salt, nonce);
           const blob = new Blob([privateKey], { type: "text/plain" });
