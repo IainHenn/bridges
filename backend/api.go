@@ -22,6 +22,7 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
+// Helper functions
 func encryptPrivateKey(pemBytes []byte, password string) ([]byte, error) {
 	// Derive key from password using PBKDF2
 	salt := make([]byte, 16)
@@ -83,6 +84,58 @@ func getStartingId(db *sql.DB, tableName string) int {
 	return id
 }
 
+// Middleware
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		verificationToken, err := c.Cookie("token")
+
+		if err != nil {
+			c.Status(500)
+			return
+		}
+
+		db, err := getDBAccess()
+
+		if err != nil {
+			c.Status(500)
+			c.Abort()
+			return
+		}
+
+		defer db.Close()
+
+		row := db.QueryRow(`SELECT email, salt, nonce, encrypted_key FROM users u
+					JOIN verification_tokens vt ON vt.user_id = u.id
+					WHERE verification_token = $1
+					AND expiration_date >= NOW()
+					AND verified = TRUE`, (verificationToken))
+
+		var email string
+		var salt string
+		var nonce string
+		var encrypted_key string
+
+		err = row.Scan(&email, &salt, &nonce, &encrypted_key)
+
+		if err == sql.ErrNoRows {
+			c.Status(401)
+			c.Abort()
+			return
+		} else if err != nil {
+			c.Status(500)
+			c.Abort()
+			return
+		}
+
+		c.Set("email", email)
+		c.Set("salt", salt)
+		c.Set("nonce", nonce)
+		c.Set("encrypted_key", encrypted_key)
+		c.Next()
+	}
+}
+
+// REST Routes
 func loginUser(c *gin.Context) {
 
 	type User struct {
@@ -300,11 +353,11 @@ func setTokenCookieHandler(c *gin.Context) {
 	c.SetCookie(
 		"token",
 		req.Token,
-		24*60*60, // 1 day in seconds
+		1*60*60,
 		"/",
 		"",
-		true, // Secure: true in production
-		true, // HttpOnly
+		false, // Secure: true in production
+		true,  // HttpOnly
 	)
 	c.Status(http.StatusOK)
 }
@@ -313,9 +366,9 @@ func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
 	router.Use(cors.Default())
-	router.POST("/sessions", loginUser)
-	router.POST("/users", signupUser)
-	router.POST("/tokens", generateToken)
-	router.POST("/api/set-token-cookie", setTokenCookieHandler)
+	router.POST("/sessions", loginUser)                  // POST /sessions to create a session (login)
+	router.POST("/users", signupUser)                    // POST /users to create a user (signup)
+	router.POST("/tokens", generateToken)                // POST /tokens to create a token
+	router.POST("/token-cookies", setTokenCookieHandler) // POST /token-cookies to set a token cookie
 	router.Run("localhost:8080")
 }
