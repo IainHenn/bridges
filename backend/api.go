@@ -380,7 +380,7 @@ func retrieveChallenge(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{
-		"nonce": fmt.Sprintf("%x", nonce),
+		"nonce": base64.StdEncoding.EncodeToString(nonce),
 	})
 }
 
@@ -439,16 +439,11 @@ func verifySignature(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid signature encoding"})
 		return
 	}
-
-	// Decode challenge from hex to bytes
+	// Decode challenge from base64 to bytes
 	challengeBytes, err := base64.StdEncoding.DecodeString(req.Challenge)
 	if err != nil {
-		// If not base64, try hex
-		challengeBytes, err = decodeHexString(req.Challenge)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid challenge encoding"})
-			return
-		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid challenge encoding"})
+		return
 	}
 
 	hashed := sha256.Sum256(challengeBytes)

@@ -91,8 +91,7 @@ export default function Dashboard() {
 
     if(response.ok){
       randomNonce = data.nonce;
-      const encoder = new TextEncoder();
-      const challengeBytes = encoder.encode(randomNonce);
+      const challengeBytes = base64ToArrayBuffer(randomNonce);
       
       const signature = await crypto.subtle.sign(
         {
