@@ -10,10 +10,15 @@ import (
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 
+	"crypto"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"io"
 	"time"
 
@@ -82,6 +87,12 @@ func getStartingId(db *sql.DB, tableName string) int {
 		return 1 // fallback to 1 if error
 	}
 	return id
+}
+
+func decodeHexString(s string) ([]byte, error) {
+	b := make([]byte, len(s)/2)
+	_, err := fmt.Sscanf(s, "%x", &b)
+	return b, err
 }
 
 // Middleware
@@ -362,6 +373,113 @@ func setTokenCookieHandler(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
+func retrieveChallenge(c *gin.Context) {
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate nonce"})
+		return
+	}
+	c.JSON(200, gin.H{
+		"nonce": fmt.Sprintf("%x", nonce),
+	})
+}
+
+type SignatureRequest struct {
+	Signature string `json:"signature"`
+	Challenge string `json:"challenge"`
+}
+
+func verifySignature(c *gin.Context) {
+	var req SignatureRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	email, exists := c.Get("email")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not found in context"})
+		return
+	}
+
+	db, err := getDBAccess()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	var publicKey string
+	row := db.QueryRow("SELECT public_key FROM users WHERE email = $1", email)
+	err = row.Scan(&publicKey)
+
+	if err == sql.ErrNoRows {
+		c.Status(404)
+		return
+	} else if err != nil {
+		c.Status(500)
+		return
+	}
+
+	// Decode public key from base64
+	pubBytes, err := base64.StdEncoding.DecodeString(publicKey)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid public key format"})
+		return
+	}
+
+	pub, err := x509.ParsePKIXPublicKey(pubBytes)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse public key"})
+		return
+	}
+
+	// Decode the signature from base64
+	sigBytes, err := base64.StdEncoding.DecodeString(req.Signature)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid signature encoding"})
+		return
+	}
+
+	// Decode challenge from hex to bytes
+	challengeBytes, err := base64.StdEncoding.DecodeString(req.Challenge)
+	if err != nil {
+		// If not base64, try hex
+		challengeBytes, err = decodeHexString(req.Challenge)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid challenge encoding"})
+			return
+		}
+	}
+
+	hashed := sha256.Sum256(challengeBytes)
+
+	switch pk := pub.(type) {
+	case *rsa.PublicKey:
+		err = rsa.VerifyPKCS1v15(pk, crypto.SHA256, hashed[:], sigBytes)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Signature verification failed"})
+			return
+		}
+	case *ecdsa.PublicKey:
+		if len(sigBytes) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Empty signature"})
+			return
+		}
+		if ecdsa.VerifyASN1(pk, hashed[:], sigBytes) {
+			c.JSON(http.StatusOK, gin.H{"success": true})
+			return
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Signature verification failed"})
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported public key type"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -370,5 +488,7 @@ func main() {
 	router.POST("/users", signupUser)                    // POST /users to create a user (signup)
 	router.POST("/tokens", generateToken)                // POST /tokens to create a token
 	router.POST("/token-cookies", setTokenCookieHandler) // POST /token-cookies to set a token cookie
+	router.GET("/api/challenge", AuthMiddleware(), retrieveChallenge)
+	router.POST("/signatures/verify", AuthMiddleware(), verifySignature)
 	router.Run("localhost:8080")
 }
