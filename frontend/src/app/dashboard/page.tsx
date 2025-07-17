@@ -106,11 +106,12 @@ export default function Dashboard() {
     console.log("raw pem: ", text);
     const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
     setPrivateKey(returnedKey);
-    const response = await fetch("http://localhost:8080/api/challenge", {
+    const response = await fetch("/api/challenge", {
       method: "GET",
       headers: {
       "Content-Type": "application/json"
-      }
+      },
+      credentials: "include"
     });
 
     const data = await response.json();
@@ -144,11 +145,12 @@ export default function Dashboard() {
 
       console.log("right before verifyResponse");
 
-      const verifyResponse = await fetch("/signatures/verify", {
+      const verifyResponse = await fetch("http://localhost:8080/signatures/verify", { 
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
+        credentials: "include",
         body: JSON.stringify({
           signature: Buffer.from(new Uint8Array(signature)).toString('base64'),
           challenge: randomNonce
@@ -158,6 +160,9 @@ export default function Dashboard() {
       const verifyData = await verifyResponse.json();
       if (verifyResponse.ok && verifyData.success) {
         console.log("nice");
+      }
+      else{
+        console.log(verifyResponse.error);
       }
     }
   }

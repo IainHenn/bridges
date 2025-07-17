@@ -98,10 +98,16 @@ func decodeHexString(s string) ([]byte, error) {
 // Middleware
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+
+		for _, cookie := range c.Request.Cookies() {
+			fmt.Printf("🍪 Cookie received: %s = %s\n", cookie.Name, cookie.Value)
+		}
+
 		verificationToken, err := c.Cookie("token")
 
 		if err != nil {
 			c.Status(500)
+			c.Abort()
 			return
 		}
 
@@ -117,7 +123,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		row := db.QueryRow(`SELECT email, salt, nonce, encrypted_key FROM users u
 					JOIN verification_tokens vt ON vt.user_id = u.id
-					WHERE verification_token = $1
+					WHERE token = $1
 					AND expiration_date >= NOW()
 					AND verified = TRUE`, (verificationToken))
 
@@ -139,6 +145,8 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		c.Set("email", email)
+		emailVal, _ := c.Get("email")
+		fmt.Println("Authenticated email:", emailVal)
 		c.Set("salt", salt)
 		c.Set("nonce", nonce)
 		c.Set("encrypted_key", encrypted_key)
@@ -361,21 +369,23 @@ func setTokenCookieHandler(c *gin.Context) {
 		return
 	}
 
-	c.SetCookie(
-		"token",
-		req.Token,
-		1*60*60,
-		"/",
-		"",
-		false, // Secure: true in production
-		true,  // HttpOnly
-	)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "token",
+		Value:    req.Token,
+		Path:     "/",
+		MaxAge:   3600,
+		HttpOnly: true,
+		Secure:   false, // Set to true if using HTTPS
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	c.Status(http.StatusOK)
 }
 
 func retrieveChallenge(c *gin.Context) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
+		fmt.Println("this was the failure")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate nonce"})
 		return
 	}
@@ -390,45 +400,64 @@ type SignatureRequest struct {
 }
 
 func verifySignature(c *gin.Context) {
+	fmt.Println("verifySignature called")
 	var req SignatureRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		fmt.Println("Failed to bind JSON:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
 
 	email, exists := c.Get("email")
 	if !exists {
+		fmt.Println("Email not found in context")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Email not found in context"})
 		return
 	}
 
+	fmt.Println("Email from context:", email)
+
 	db, err := getDBAccess()
 	if err != nil {
+		fmt.Println("Failed to get DB access:", err)
 		c.Status(500)
 		return
 	}
 
 	var publicKey string
-	row := db.QueryRow("SELECT public_key FROM users WHERE email = $1", email)
+	emailStr, ok := email.(string)
+	if !ok {
+		fmt.Println("Email in context is not a string")
+		c.Status(500)
+		return
+	}
+	fmt.Println("Querying public key for email:", emailStr)
+	row := db.QueryRow("SELECT pub_key FROM users WHERE email = $1", emailStr)
 	err = row.Scan(&publicKey)
 
 	if err == sql.ErrNoRows {
+		fmt.Println("No row found for email:", emailStr)
 		c.Status(404)
 		return
 	} else if err != nil {
+		fmt.Println("Error scanning public key:", err)
 		c.Status(500)
 		return
 	}
 
+	fmt.Println("Public key retrieved:", publicKey)
+
 	// Decode public key from base64
 	pubBytes, err := base64.StdEncoding.DecodeString(publicKey)
 	if err != nil {
+		fmt.Println("Failed to decode public key from base64:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid public key format"})
 		return
 	}
 
 	pub, err := x509.ParsePKIXPublicKey(pubBytes)
 	if err != nil {
+		fmt.Println("Failed to parse public key:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse public key"})
 		return
 	}
@@ -436,49 +465,69 @@ func verifySignature(c *gin.Context) {
 	// Decode the signature from base64
 	sigBytes, err := base64.StdEncoding.DecodeString(req.Signature)
 	if err != nil {
+		fmt.Println("Failed to decode signature from base64:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid signature encoding"})
 		return
 	}
 	// Decode challenge from base64 to bytes
 	challengeBytes, err := base64.StdEncoding.DecodeString(req.Challenge)
 	if err != nil {
+		fmt.Println("Failed to decode challenge from base64:", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid challenge encoding"})
 		return
 	}
 
+	fmt.Println("Signature and challenge decoded")
+
 	hashed := sha256.Sum256(challengeBytes)
+	fmt.Println("Challenge hashed")
 
 	switch pk := pub.(type) {
 	case *rsa.PublicKey:
+		fmt.Println("Verifying RSA signature")
 		err = rsa.VerifyPKCS1v15(pk, crypto.SHA256, hashed[:], sigBytes)
 		if err != nil {
+			fmt.Println("RSA signature verification failed:", err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Signature verification failed"})
 			return
 		}
+		fmt.Println("RSA signature verified successfully")
 	case *ecdsa.PublicKey:
+		fmt.Println("Verifying ECDSA signature")
 		if len(sigBytes) == 0 {
+			fmt.Println("ECDSA signature is empty")
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Empty signature"})
 			return
 		}
 		if ecdsa.VerifyASN1(pk, hashed[:], sigBytes) {
+			fmt.Println("ECDSA signature verified successfully")
 			c.JSON(http.StatusOK, gin.H{"success": true})
 			return
 		} else {
+			fmt.Println("ECDSA signature verification failed")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Signature verification failed"})
 			return
 		}
 	default:
+		fmt.Println("Unsupported public key type")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported public key type"})
 		return
 	}
 
+	fmt.Println("Signature verified successfully, returning OK")
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
-	router.Use(cors.Default())
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 	router.POST("/sessions", loginUser)                  // POST /sessions to create a session (login)
 	router.POST("/users", signupUser)                    // POST /users to create a user (signup)
 	router.POST("/tokens", generateToken)                // POST /tokens to create a token

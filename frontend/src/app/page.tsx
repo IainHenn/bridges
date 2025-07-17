@@ -31,7 +31,7 @@ export default function Home() {
             const tokenData = await tokenResponse.json();
             // Store token in httpOnly cookie via server (client JS cannot set httpOnly cookies directly)
             // Send token to an API route that sets the cookie
-            await fetch("http://localhost:8080/token-cookies", {
+            await fetch("/token-cookies", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ token: tokenData.token })
