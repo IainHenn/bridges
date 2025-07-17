@@ -106,7 +106,7 @@ export default function Dashboard() {
     console.log("raw pem: ", text);
     const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
     setPrivateKey(returnedKey);
-    const response = await fetch("/api/challenge", {
+    const response = await fetch("http://localhost:8080/api/challenge", {
       method: "GET",
       headers: {
       "Content-Type": "application/json"
@@ -119,25 +119,30 @@ export default function Dashboard() {
 
     console.log("here");
     if(response.ok){
+      console.log("in here");
       randomNonce = data.nonce;
+      console.log("random nonce: ", randomNonce);
       const challengeBytes = base64ToArrayBuffer(randomNonce);
-      
+      console.log("returned key: ", returnedKey);
       const signature = await crypto.subtle.sign(
         {
-          name: "RSASSA-PKCS1-v1_5"
+          name: "ECDSA",
+          hash: { name: "SHA-256" }
         },
         await window.crypto.subtle.importKey(
           "pkcs8",
-          base64ToArrayBuffer(privateKey),
+          base64ToArrayBuffer(returnedKey),
           {
-            name: "RSASSA-PKCS1-v1_5",
-            hash: "SHA-256"
+            name: "ECDSA",
+            namedCurve: "P-256"
           },
           false,
           ["sign"]
         ),
         challengeBytes
       );
+
+      console.log("right before verifyResponse");
 
       const verifyResponse = await fetch("/signatures/verify", {
         method: "POST",
