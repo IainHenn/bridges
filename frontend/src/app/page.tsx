@@ -22,7 +22,6 @@ export default function Home() {
     })
       .then(async response => {
         if(response.status == 200){
-          console.log("User exists");
           const tokenResponse = await fetch("http://localhost:8080/tokens", {
             method: "POST",
             body: JSON.stringify({ "email": email, "password": password })

@@ -40,26 +40,17 @@ export default function Dashboard() {
     saltBase64: string,
     nonceBase64: string
   ): Promise<string> {
-    console.log("encryptedBlobBase64:", encryptedBlobBase64);
-    console.log("saltBase64:", saltBase64);
-    console.log("nonceBase64:", nonceBase64);
 
     const encryptedBlob = base64ToArrayBuffer(encryptedBlobBase64);
     const salt = base64ToArrayBuffer(saltBase64);
     const nonce = base64ToArrayBuffer(nonceBase64);
 
-    console.log("encryptedBlobBuffer:", encryptedBlob);
-    console.log("saltBuffer:", salt);
-    console.log("nonceBuffer:", nonce);
-
-    console.log("inside decryptPrivateKey");
     // Derive key with PBKDF2
     const keyMaterial = await window.crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(password),
       "PBKDF2", false, ["deriveKey"]
     );
-    console.log("after keyMaterial");
     const key = await window.crypto.subtle.deriveKey(
       {
         name: "PBKDF2",
@@ -72,7 +63,6 @@ export default function Dashboard() {
       false,
       ["decrypt"]
     );
-    console.log("after key creation");
 
     // Decrypt private key bytes
     const decrypted = await window.crypto.subtle.decrypt(
@@ -83,7 +73,6 @@ export default function Dashboard() {
       key,
       encryptedBlob
     );
-    console.log("after decrypted");
     return arrayBufferToBase64(decrypted); 
   }
 
@@ -154,10 +143,6 @@ export default function Dashboard() {
     const acceptedFile = acceptedFiles[0];
     let text = await acceptedFile.text();
     const {salt, nonce, encryptedKey } = JSON.parse(text);
-    console.log("salt:", salt);
-    console.log("nonce:", nonce);
-    console.log("encryptedKey:", encryptedKey);
-    console.log("raw pem: ", text);
     const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
     setPrivateKey(returnedKey);
     const response = await fetch("/api/challenge", {
@@ -172,13 +157,9 @@ export default function Dashboard() {
 
     let randomNonce = null;
 
-    console.log("here");
     if(response.ok){
-      console.log("in here");
       randomNonce = data.nonce;
-      console.log("random nonce: ", randomNonce);
       const challengeBytes = base64ToArrayBuffer(randomNonce);
-      console.log("returned key: ", returnedKey);
       const signature = await crypto.subtle.sign(
         {
           name: "ECDSA",
@@ -197,7 +178,6 @@ export default function Dashboard() {
         challengeBytes
       );
 
-      console.log("right before verifyResponse");
 
       const verifyResponse = await fetch("http://localhost:8080/signatures/verify", { 
         method: "POST",
