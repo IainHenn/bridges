@@ -86,6 +86,49 @@ export default function Dashboard() {
     return arrayBufferToBase64(decrypted); 
   }
 
+  function rawSigToASN1(rawSig) {
+    // rawSig: ArrayBuffer or Uint8Array of length 64 (32 bytes r, 32 bytes s)
+    const sig = new Uint8Array(rawSig);
+    const r = sig.slice(0, 32);
+    const s = sig.slice(32, 64);
+
+  // Remove leading zeros
+  function trimZeros(arr) {
+    let i = 0;
+    while (i < arr.length - 1 && arr[i] === 0) i++;
+      return arr.slice(i);
+    }
+    const rTrim = trimZeros(r);
+    const sTrim = trimZeros(s);
+
+    // If high bit is set, prepend 0x00
+    function prependZeroIfNeeded(arr) {
+      if (arr[0] & 0x80) {
+        const out = new Uint8Array(arr.length + 1);
+        out[0] = 0;
+        out.set(arr, 1);
+        return out;
+      }
+      return arr;
+    }
+    const rEnc = prependZeroIfNeeded(rTrim);
+    const sEnc = prependZeroIfNeeded(sTrim);
+
+    // ASN.1 DER encoding
+    function encodeInt(arr) {
+      return [0x02, arr.length, ...arr];
+    }
+    const encoded = [
+      0x30,
+      2 + rEnc.length + 2 + sEnc.length, // total length
+      ...encodeInt(rEnc),
+      ...encodeInt(sEnc)
+    ];
+    return new Uint8Array(encoded);
+  }
+
+  
+
   function pemToArrayBuffer(pem: string): ArrayBuffer {
     const base64 = pem.replace(/-----.*-----/g, '').replace(/\s+/g, '');
     const binary = window.atob(base64);
@@ -152,7 +195,7 @@ export default function Dashboard() {
         },
         credentials: "include",
         body: JSON.stringify({
-          signature: Buffer.from(new Uint8Array(signature)).toString('base64'),
+          signature: Buffer.from(rawSigToASN1(signature)).toString('base64'),
           challenge: randomNonce
         })
       });
