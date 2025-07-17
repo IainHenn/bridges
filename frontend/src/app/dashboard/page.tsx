@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from 'next/navigation';
 import { decodeReply } from "next/dist/server/app-render/entry-base";
 import Dropzone from 'react-dropzone'
@@ -7,6 +7,7 @@ import Dropzone from 'react-dropzone'
 
 export default function Dashboard() {
 
+  const router = useRouter();
   const [validated, setValidation] = useState(false);
   const [validationPhrase, setValidationPhrase] = useState("");
   const [salt, setSalt] = useState("");
@@ -127,8 +128,6 @@ export default function Dashboard() {
     return new Uint8Array(encoded);
   }
 
-  
-
   function pemToArrayBuffer(pem: string): ArrayBuffer {
     const base64 = pem.replace(/-----.*-----/g, '').replace(/\s+/g, '');
     const binary = window.atob(base64);
@@ -138,6 +137,18 @@ export default function Dashboard() {
     }
     return bytes.buffer;
   }
+
+  useEffect(() => {
+    fetch("http://localhost:8080/users/authorize", {
+      method: "GET",
+      credentials: "include"
+    })
+    .then(resp => {
+      if(!resp.ok){
+        router.push("/");
+      }
+    });
+  }, []);
 
   const handleDrop = async (acceptedFiles: File[]) => {
     const acceptedFile = acceptedFiles[0];

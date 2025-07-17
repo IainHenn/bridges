@@ -518,6 +518,15 @@ func verifySignature(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
+func authorizeUser(c *gin.Context) {
+	_, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+	c.Status(200)
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -534,5 +543,6 @@ func main() {
 	router.POST("/token-cookies", setTokenCookieHandler) // POST /token-cookies to set a token cookie
 	router.GET("/api/challenge", AuthMiddleware(), retrieveChallenge)
 	router.POST("/signatures/verify", AuthMiddleware(), verifySignature)
+	router.GET("/users/authorize", AuthMiddleware(), authorizeUser)
 	router.Run("localhost:8080")
 }
