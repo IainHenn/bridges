@@ -23,6 +23,15 @@ export default function SignUp() {
     return bytes.buffer;
   }
 
+  function arrayBufferToBase64(buffer: ArrayBuffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
   // Decrypt private key using password, salt, and nonce
   async function decryptPrivateKey(
     encryptedBlobBase64: string,
@@ -63,7 +72,13 @@ export default function SignUp() {
       key,
       encryptedBlob
     );
-    return new TextDecoder().decode(decrypted); 
+    return arrayBufferToBase64(decrypted); 
+  }
+
+  function arrayBufferToPem(buffer: ArrayBuffer): string {
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    const pem = `-----BEGIN PRIVATE KEY-----\n${base64.match(/.{1,64}/g)?.join('\n')}\n-----END PRIVATE KEY-----`;
+    return pem;
   }
 
   const renderSignUp = async (event: React.FormEvent) => {
@@ -146,8 +161,13 @@ export default function SignUp() {
         console.log("user created");
 
         if (encryptedKey && salt && nonce) {
-          const privateKey = await decryptPrivateKey(encryptedKey, validationPhrase, salt, nonce);
-          const blob = new Blob([privateKey], { type: "text/plain" });
+          //let privateKey = await decryptPrivateKey(encryptedKey, validationPhrase, salt, nonce);
+          const fileContent = JSON.stringify({
+            salt,
+            nonce,
+            encryptedKey
+          });
+          const blob = new Blob([fileContent], { type: "application/json" });
           setUrl(URL.createObjectURL(blob));
         }
       } else {

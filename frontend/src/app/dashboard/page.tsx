@@ -24,23 +24,41 @@ export default function Dashboard() {
     return bytes.buffer;
   }
 
+  function arrayBufferToBase64(buffer: ArrayBuffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
   async function decryptPrivateKey(
     encryptedBlobBase64: string,
     password: string,
     saltBase64: string,
     nonceBase64: string
   ): Promise<string> {
+    console.log("encryptedBlobBase64:", encryptedBlobBase64);
+    console.log("saltBase64:", saltBase64);
+    console.log("nonceBase64:", nonceBase64);
+
     const encryptedBlob = base64ToArrayBuffer(encryptedBlobBase64);
     const salt = base64ToArrayBuffer(saltBase64);
     const nonce = base64ToArrayBuffer(nonceBase64);
 
+    console.log("encryptedBlobBuffer:", encryptedBlob);
+    console.log("saltBuffer:", salt);
+    console.log("nonceBuffer:", nonce);
+
+    console.log("inside decryptPrivateKey");
     // Derive key with PBKDF2
     const keyMaterial = await window.crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(password),
       "PBKDF2", false, ["deriveKey"]
     );
-
+    console.log("after keyMaterial");
     const key = await window.crypto.subtle.deriveKey(
       {
         name: "PBKDF2",
@@ -53,6 +71,7 @@ export default function Dashboard() {
       false,
       ["decrypt"]
     );
+    console.log("after key creation");
 
     // Decrypt private key bytes
     const decrypted = await window.crypto.subtle.decrypt(
@@ -63,21 +82,30 @@ export default function Dashboard() {
       key,
       encryptedBlob
     );
-    return new TextDecoder().decode(decrypted); 
+    console.log("after decrypted");
+    return arrayBufferToBase64(decrypted); 
+  }
+
+  function pemToArrayBuffer(pem: string): ArrayBuffer {
+    const base64 = pem.replace(/-----.*-----/g, '').replace(/\s+/g, '');
+    const binary = window.atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
   }
 
   const handleDrop = async (acceptedFiles: File[]) => {
     const acceptedFile = acceptedFiles[0];
     let text = await acceptedFile.text();
-    const buffer = await acceptedFile.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    console.log(`bytes: ${bytes}`);
-    setSalt(Buffer.from(bytes.slice(0, 16)).toString('base64'));
-    setNonce(Buffer.from(bytes.slice(16, 28)).toString('base64'));
-    setEncryptedKey(Buffer.from(bytes.slice(28)).toString('base64'));
-
-    setPrivateKey(await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce));
-
+    const {salt, nonce, encryptedKey } = JSON.parse(text);
+    console.log("salt:", salt);
+    console.log("nonce:", nonce);
+    console.log("encryptedKey:", encryptedKey);
+    console.log("raw pem: ", text);
+    const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
+    setPrivateKey(returnedKey);
     const response = await fetch("/api/challenge", {
       method: "GET",
       headers: {
@@ -89,6 +117,7 @@ export default function Dashboard() {
 
     let randomNonce = null;
 
+    console.log("here");
     if(response.ok){
       randomNonce = data.nonce;
       const challengeBytes = base64ToArrayBuffer(randomNonce);
