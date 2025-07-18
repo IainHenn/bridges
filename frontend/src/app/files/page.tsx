@@ -30,13 +30,11 @@ export default function files() {
                 id="file-upload"
                 type="file"
                 className="hidden"
+                // @ts-ignore
+                webkitdirectory="true"
                 onChange={(e) => {
                     // handle file upload here
-                    const file = e.target.files?.[0];
-                    if (file) {
-                        // You can process the file here
-                        console.log("Selected file:", file);
-                    }
+                    console.log(Array.from(e.target.files || []));
                 }}
             />
         </label>
@@ -48,21 +46,50 @@ export default function files() {
         <div className="w-full h-full overflow-auto">
             <Dropzone
                 noClick
-                onDrop={acceptedFiles => {
-                    // handle dropped files here
-                    if (acceptedFiles.length > 0) {
-                        //This is wrong fix later
-                        setFiles(prev => [...prev, ...acceptedFiles.map(f => f.name)]);
-                    }
-                }}
             >
                 {({ getRootProps, getInputProps, isDragActive, isDragAccept, isDragReject }) => (
                     <div
-                        {...getRootProps()}
+                        {...getRootProps({
+                            onDrop: undefined, // disable Dropzone's default onDrop
+                            onDragOver: (e: React.DragEvent) => e.preventDefault(),
+                            onDrop: (event: React.DragEvent) => {
+                                event.preventDefault();
+                                const items = event.dataTransfer.items;
+                                const droppedFiles: string[] = [];
+                                let pending = 0;
+
+                                function traverseFileTree(item: any, path = "") {
+                                    if (item.isFile) {
+                                        pending++;
+                                        item.file((file: File) => {
+                                            // @ts-ignore
+                                            file['fullPath'] = path + file.name;
+                                            droppedFiles.push(path + file.name);
+                                            pending--;
+                                            if (pending === 0) {
+                                                setFiles(prev => [...prev, ...droppedFiles]);
+                                            }
+                                        });
+                                    } else if (item.isDirectory) {
+                                        const dirReader = item.createReader();
+                                        dirReader.readEntries((entries: any[]) => {
+                                            entries.forEach(entry => traverseFileTree(entry, path + item.name + "/"));
+                                        });
+                                    }
+                                }
+
+                                for (let i = 0; i < items.length; i++) {
+                                    const item = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry();
+                                    if (item) {
+                                        traverseFileTree(item);
+                                    }
+                                }
+                            }
+                        })}
                         className={`transition-colors duration-200 ${
                             isDragActive ? "bg-blue-700" : "bg-blue-600"
                         } min-w-full rounded-lg`}
-                        style={{ cursor: "pointer" }}
+                        style={{ cursor: "pointer", position: "relative" }}
                     >
                         <input {...getInputProps()} />
                         <table className="min-w-full rounded-lg">
