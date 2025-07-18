@@ -38,7 +38,7 @@ export default function Home() {
           } else {
             console.log("failed to generate user token");
           }
-          router.push('/dashboard');
+          router.push('/validate');
         } else {
           console.log(`Failed to login user: ${response.status}`)
         }

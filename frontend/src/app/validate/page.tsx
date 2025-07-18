@@ -5,7 +5,7 @@ import { decodeReply } from "next/dist/server/app-render/entry-base";
 import Dropzone from 'react-dropzone'
 
 
-export default function Dashboard() {
+export default function Validation() {
 
   const router = useRouter();
   const [validated, setValidation] = useState(false);
@@ -193,7 +193,7 @@ export default function Dashboard() {
 
       const verifyData = await verifyResponse.json();
       if (verifyResponse.ok && verifyData.success) {
-        console.log("nice");
+        router.push("/files");
       }
       else{
         console.log(verifyResponse.error);
