@@ -25,9 +25,30 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/pbkdf2"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/joho/godotenv"
 )
 
 // Helper functions
+func initDynamoDB() (*dynamodb.DynamoDB, error) {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println("Error loading .env file")
+	}
+
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(os.Getenv("AWS_REGION")),
+	})
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	return dynamodb.New(sess), err
+}
+
 func encryptPrivateKey(pemBytes []byte, password string) ([]byte, error) {
 	// Derive key from password using PBKDF2
 	salt := make([]byte, 16)
@@ -112,6 +133,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		db, err := getDBAccess()
 
 		if err != nil {
+			fmt.Println("cant get db acccess")
 			c.Status(500)
 			c.Abort()
 			return
@@ -119,7 +141,7 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		defer db.Close()
 
-		row := db.QueryRow(`SELECT email, salt, nonce, encrypted_key FROM users u
+		row := db.QueryRow(`SELECT email, salt, nonce, encrypted_key, pub_key FROM users u
 					JOIN verification_tokens vt ON vt.user_id = u.id
 					WHERE token = $1
 					AND expiration_date >= NOW()
@@ -129,14 +151,16 @@ func AuthMiddleware() gin.HandlerFunc {
 		var salt string
 		var nonce string
 		var encrypted_key string
+		var public_key string
 
-		err = row.Scan(&email, &salt, &nonce, &encrypted_key)
+		err = row.Scan(&email, &salt, &nonce, &encrypted_key, &public_key)
 
 		if err == sql.ErrNoRows {
 			c.Status(401)
 			c.Abort()
 			return
 		} else if err != nil {
+			fmt.Println("some weird error,", err)
 			c.Status(500)
 			c.Abort()
 			return
@@ -146,6 +170,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("salt", salt)
 		c.Set("nonce", nonce)
 		c.Set("encrypted_key", encrypted_key)
+		c.Set("public_key", public_key)
 		c.Next()
 	}
 }
@@ -483,6 +508,42 @@ func authorizeUser(c *gin.Context) {
 		c.Status(401)
 		return
 	}
+
+	public_key, exists := c.Get("public_key")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	c.IndentedJSON(200, gin.H{"public_key": public_key})
+}
+
+func uploadUserData(c *gin.Context) {
+	fmt.Println("we inside upload")
+
+	// Log the request body sent by the user
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		fmt.Println("Failed to read request body:", err)
+		c.Status(400)
+		return
+	}
+	fmt.Printf("User upload data: %s\n", string(body))
+
+	_, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	_, err = initDynamoDB()
+
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
 	c.Status(200)
 }
 
@@ -503,5 +564,6 @@ func main() {
 	router.GET("/api/challenge", AuthMiddleware(), retrieveChallenge)
 	router.POST("/signatures/verify", AuthMiddleware(), verifySignature)
 	router.GET("/users/authorize", AuthMiddleware(), authorizeUser)
+	router.POST("/users/upload", AuthMiddleware(), uploadUserData)
 	router.Run("localhost:8080")
 }

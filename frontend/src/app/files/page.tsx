@@ -6,9 +6,27 @@ import Dropzone from 'react-dropzone'
 
 
 export default function files() {
+  const router = useRouter();
   const [files, setFiles] = useState(['example.txt']);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
+  type FileMetadata = {
+    fullPath: string;
+    uploadDate: Date;
+    lastModified: number;
+    name: string;
+    webkitRelativePath: string;
+    size: number;
+    type: string;
+    arrayBuffer: () => Promise<ArrayBuffer>;
+    bytes: () => Promise<Uint8Array>;
+    slice: (start?: number, end?: number, contentType?: string) => Blob;
+    stream: () => ReadableStream<Uint8Array>;
+    text: () => Promise<string>;
+    iv?: string;
+    encryptedAesKey?: string;
+    encryptedFile?: string;
+  };
 
   const selectAllFiles = () => {
 
@@ -21,6 +39,54 @@ export default function files() {
     setSelectAll(false);
     }
   }
+
+  useEffect(() => {
+    fetch("http://localhost:8080/users/authorize", {
+        method: "GET",
+        credentials: "include",
+        headers: {
+            "Content-Type": "application/json"
+        }
+    })
+    .then(resp => {
+        if(!resp.ok){
+            router.push("/")
+        } else {
+            return resp.json();
+        }
+    })
+    .then(data => {
+        if (data && data.public_key) {
+            setPublicKey(data.public_key);
+        }
+
+        if (!sessionStorage.getItem("aes_public_key")) {
+            window.crypto.subtle.generateKey(
+            {
+                name: "RSA-OAEP",
+                modulusLength: 2048,
+                publicExponent: new Uint8Array([1, 0, 1]),
+                hash: "SHA-256",
+            },
+            true,
+            ["encrypt", "decrypt"]
+            ).then(keyPair => {
+            window.crypto.subtle.exportKey("spki", keyPair.publicKey).then(exportedKey => {
+                // Exported as ArrayBuffer in SPKI format, encode to base64
+                const uint8Array = new Uint8Array(exportedKey);
+                let binary = "";
+                for (let i = 0; i < uint8Array.byteLength; i++) {
+                binary += String.fromCharCode(uint8Array[i]);
+                }
+                const base64Key = window.btoa(binary);
+                sessionStorage.setItem("aes_public_key", base64Key);
+            });
+            });
+        }
+    });
+  }, []);
+
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-purple-950">
     <div className="flex flex-col items-center space-y-4 mr-6 -mt-105">
@@ -57,17 +123,131 @@ export default function files() {
                                 const items = event.dataTransfer.items;
                                 const droppedFiles: string[] = [];
                                 let pending = 0;
+                                const fileMetadatas: FileMetadata[] = [];
 
                                 function traverseFileTree(item: any, path = "") {
+                                    let uploadStarted = false;
                                     if (item.isFile) {
                                         pending++;
-                                        item.file((file: File) => {
-                                            // @ts-ignore
-                                            file['fullPath'] = path + file.name;
+                                        item.file(async (file: File) => {
+                                            let file_metadata = {
+                                                ...file,
+                                                fullPath: path + file.name,
+                                                uploadDate: new Date()                                                
+                                            };
                                             droppedFiles.push(path + file.name);
+
+                                            function base64ToArrayBuffer(base64: string): ArrayBuffer {
+                                                const binaryString = window.atob(base64);
+                                                const len = binaryString.length;
+                                                const bytes = new Uint8Array(len);
+                                                for (let i = 0; i < len; i++) {
+                                                bytes[i] = binaryString.charCodeAt(i);
+                                                }
+                                                return bytes.buffer;
+                                            }
+
+                                            function arrayBufferToBase64(buffer: ArrayBuffer) {
+                                                const bytes = new Uint8Array(buffer);
+                                                let binary = "";
+                                                for (let i = 0; i < bytes.byteLength; i++) {
+                                                binary += String.fromCharCode(bytes[i]);
+                                                }
+                                                return window.btoa(binary);
+                                            }
+
+                                            const encoder = new TextEncoder();
+                                            const ivBytes = window.crypto.getRandomValues(new Uint8Array(12));
+                                            const fileBlob = new Blob([file]);
+
+                                            const aesKey = await window.crypto.subtle.generateKey(
+                                                {
+                                                    name: "AES-GCM",
+                                                    length: 256,
+                                                },
+                                                true,
+                                                ["encrypt", "decrypt"]
+                                            );
+
+                                            const encryptedData = await window.crypto.subtle.encrypt(
+                                                {
+                                                    name: "AES-GCM",
+                                                    iv: ivBytes,
+                                                },
+                                                aesKey,
+                                                await fileBlob.arrayBuffer()
+                                            );
+
+                                            // Encrypt the private key using AES-GCM
+                                            const arrayBuffer = await file.arrayBuffer();
+                                            const encryptedKeyBuffer = await window.crypto.subtle.encrypt(
+                                                {
+                                                    name: "AES-GCM",
+                                                    iv: ivBytes
+                                                },
+                                                aesKey,
+                                                arrayBuffer
+                                            );                                            
+
+                                            // Import the public key string as a CryptoKey
+                                            const aesPublicKeyBase64 = sessionStorage.getItem("aes_public_key");
+                                            if (!aesPublicKeyBase64) {
+                                                throw new Error("aes_public_key not found in sessionStorage");
+                                            }
+
+                                            const importedPublicKey = await window.crypto.subtle.importKey(
+                                                "spki",
+                                                base64ToArrayBuffer(aesPublicKeyBase64),
+                                                {
+                                                    name: "RSA-OAEP",
+                                                    hash: "SHA-256"
+                                                },
+                                                false,
+                                                ["encrypt"]
+                                            );
+
+                                            console.log("after imported public key");
+
+                                            let encryptedAesKeyBuffer = await window.crypto.subtle.encrypt(
+                                                { name: "RSA-OAEP" },
+                                                importedPublicKey,
+                                                await window.crypto.subtle.exportKey("raw", aesKey)
+                                            );
+
+                                            const iv = arrayBufferToBase64(ivBytes.buffer);
+                                            const encryptedAesKey = arrayBufferToBase64(encryptedAesKeyBuffer);
+                                            const encryptedFile = arrayBufferToBase64(encryptedData);
+
+                                            file_metadata = {
+                                                ...file_metadata,
+                                                iv: iv,
+                                                encryptedAesKey: encryptedAesKey,
+                                                encryptedFile: encryptedFile
+                                            }
+                                            fileMetadatas.push(file_metadata);
+
                                             pending--;
-                                            if (pending === 0) {
-                                                setFiles(prev => [...prev, ...droppedFiles]);
+
+                                            if(!uploadStarted && pending === 0){
+                                                uploadStarted = true;
+                                                console.dir(fileMetadatas);
+                                                try {
+                                                    const response = await fetch("http://localhost:8080/users/upload", {
+                                                        method: "POST",
+                                                        credentials: "include",
+                                                        headers: {
+                                                            "Content-Type": "application/json"
+                                                        },
+                                                        body: JSON.stringify({
+                                                            file_metadata: fileMetadatas
+                                                        })
+                                                    });
+                                                    const data = await response.json();
+                                                    // handle the response data if needed
+                                                    setFiles(prev => [...prev, ...droppedFiles]);
+                                                } catch (error) {
+                                                    console.error('Error fetching /users/upload:', error);
+                                                }
                                             }
                                         });
                                     } else if (item.isDirectory) {
