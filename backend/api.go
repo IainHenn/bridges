@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -548,27 +551,170 @@ func authorizeUser(c *gin.Context) {
 func uploadUserData(c *gin.Context) {
 	fmt.Println("we inside upload")
 
-	// Log the request body sent by the user
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		fmt.Println("Failed to read request body:", err)
-		c.Status(400)
+	// Define a struct for file metadata
+	type FileMetadata struct {
+		FullPath        string `json:"fullPath"`
+		UploadDate      string `json:"uploadDate"`
+		Iv              string `json:"iv"`
+		EncryptedAesKey string `json:"encryptedAesKey"`
+		EncryptedFile   string `json:"encryptedFile"`
+	}
+
+	var req struct {
+		FileMetadata []FileMetadata `json:"file_metadata"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
-	fmt.Printf("User upload data: %s\n", string(body))
 
-	_, exists := c.Get("email")
+	fileMetadatas := req.FileMetadata
+
+	fmt.Println("fileMetadatas", fileMetadatas)
+
+	emailVal, exists := c.Get("email")
 	if !exists {
 		c.Status(401)
 		return
 	}
 
-	_, err = initDynamoDB()
-
-	if err != nil {
-		fmt.Println(err)
+	email, ok := emailVal.(string)
+	if !ok {
 		c.Status(500)
 		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		fmt.Println("Failed to initialize DynamoDB:", err)
+		c.Status(500)
+		return
+	}
+
+	awsRegion := os.Getenv("AWS_REGION")
+	s3Bucket := os.Getenv("S3_BUCKET")
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(awsRegion),
+	})
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	s3Client := s3.New(sess)
+
+	for i := 0; i < len(fileMetadatas); i++ {
+		if !ok {
+			c.Status(500)
+			return
+		}
+		input := &dynamodb.GetItemInput{
+			TableName: aws.String("file_metadata"),
+			Key: map[string]*dynamodb.AttributeValue{
+				"email":            {S: aws.String(email)},
+				"originalFileName": {S: aws.String(fileMetadatas[i].FullPath)},
+			},
+			ProjectionExpression: aws.String("FileID"),
+		}
+
+		result, err := db.GetItem(input)
+		if err != nil {
+			fmt.Println("Error getting item from DynamoDB:", err)
+			c.Status(500)
+			return
+		}
+
+		//File already exists
+		if result.Item != nil {
+			originalPath := fileMetadatas[i].FullPath
+			ext := filepath.Ext(originalPath)
+			encPath := strings.TrimSuffix(originalPath, ext) + ".enc"
+
+			_, err = s3Client.PutObject(&s3.PutObjectInput{
+				Bucket:      aws.String(s3Bucket),
+				Key:         aws.String(fmt.Sprintf("user_data/%s/%s", email, encPath)),
+				Body:        bytes.NewReader([]byte(fileMetadatas[i].EncryptedFile)),
+				ContentType: aws.String("application/octet-stream"),
+			})
+
+			if err != nil {
+				c.Status(500)
+				return
+			}
+
+			fmt.Printf("Updating item with email: %s, originalFileName: %s\n", email, fileMetadatas[i].FullPath)
+
+			input := &dynamodb.UpdateItemInput{
+				TableName: aws.String("file_metadata"),
+				Key: map[string]*dynamodb.AttributeValue{
+					"email":            {S: aws.String(email)},
+					"originalFileName": {S: aws.String(fileMetadatas[i].FullPath)},
+				},
+				UpdateExpression: aws.String("SET lastModified = :lm, iv = :iv, EncryptedAesKey = :eak"),
+				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+					":lm":  {S: aws.String(fileMetadatas[i].UploadDate)},
+					":iv":  {S: aws.String(fileMetadatas[i].Iv)},
+					":eak": {S: aws.String(fileMetadatas[i].EncryptedAesKey)},
+				},
+			}
+
+			_, err = db.UpdateItem(input)
+			if err != nil {
+				c.Status(500)
+				return
+			}
+		} else {
+			originalPath := fileMetadatas[i].FullPath
+			ext := filepath.Ext(originalPath)
+			encPath := strings.TrimSuffix(originalPath, ext) + ".enc"
+
+			_, err = s3Client.PutObject(&s3.PutObjectInput{
+				Bucket:      aws.String(s3Bucket),
+				Key:         aws.String(fmt.Sprintf("user_data/%s/%s", email, encPath)),
+				Body:        bytes.NewReader([]byte(fileMetadatas[i].EncryptedFile)),
+				ContentType: aws.String("application/octet-stream"),
+			})
+
+			if err != nil {
+				c.Status(500)
+				return
+			}
+
+			input := &dynamodb.PutItemInput{
+				TableName: aws.String("file_metadata"),
+				Item: map[string]*dynamodb.AttributeValue{
+					"email": {
+						S: aws.String(email),
+					},
+					"lastModified": {
+						S: aws.String(fileMetadatas[i].UploadDate),
+					},
+					"uploadDate": {
+						S: aws.String(fileMetadatas[i].UploadDate),
+					},
+					"originalFileName": {
+						S: aws.String(fileMetadatas[i].FullPath),
+					},
+					"iv": {
+						S: aws.String(fileMetadatas[i].Iv),
+					},
+					"EncryptedAesKey": {
+						S: aws.String(fileMetadatas[i].EncryptedAesKey),
+					},
+					"s3Path": {
+						S: aws.String(fmt.Sprintf("user_data/%s/%s", email, encPath)),
+					},
+				},
+			}
+
+			_, err = db.PutItem(input)
+			if err != nil {
+				c.Status(500)
+				return
+			}
+		}
 	}
 
 	c.Status(200)

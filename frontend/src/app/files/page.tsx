@@ -238,9 +238,9 @@ export default function files() {
                                                             file_metadata: fileMetadatas
                                                         })
                                                     });
-                                                    const data = await response.json();
-                                                    // handle the response data if needed
-                                                    setFiles(prev => [...prev, ...droppedFiles]);
+                                                    if(response.ok){
+                                                        setFiles(prev => [...prev, ...droppedFiles]);
+                                                    }
                                                 } catch (error) {
                                                     console.error('Error fetching /users/upload:', error);
                                                 }
