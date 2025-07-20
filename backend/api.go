@@ -29,6 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/joho/godotenv"
 )
 
@@ -274,6 +275,32 @@ func signupUser(c *gin.Context) {
 			c.Status(500)
 			return
 		}
+
+		// Setup s3 folder for user
+		awsRegion := os.Getenv("AWS_REGION")
+		s3Bucket := os.Getenv("S3_BUCKET")
+		sess, err := session.NewSession(&aws.Config{
+			Region: aws.String(awsRegion),
+		})
+
+		if err != nil {
+			fmt.Println("Failed to create AWS session:", err)
+			return
+		}
+
+		s3Client := s3.New(sess)
+		_, err = s3Client.PutObject(&s3.PutObjectInput{
+			Bucket: aws.String(s3Bucket),
+			Key:    aws.String(fmt.Sprintf("user_data/%s/", userReq.Email)),
+			Body:   nil,
+		})
+
+		if err != nil {
+			fmt.Println("Failed to create S3 folder:", err)
+			c.Status(500)
+			return
+		}
+
 		c.Status(201)
 		return
 	} else if err != nil {
