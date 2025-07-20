@@ -56,10 +56,6 @@ export default function files() {
         }
     })
     .then(data => {
-        if (data && data.public_key) {
-            setPublicKey(data.public_key);
-        }
-
         if (!sessionStorage.getItem("aes_public_key")) {
             window.crypto.subtle.generateKey(
             {
