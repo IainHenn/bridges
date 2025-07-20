@@ -6,8 +6,14 @@ import Dropzone from 'react-dropzone'
 
 
 export default function files() {
+
+  type FilePreview = {
+    FileName: string
+    LastModified: Date
+  }
+  
   const router = useRouter();
-  const [files, setFiles] = useState(['example.txt']);
+  const [files, setFiles] = useState<FilePreview[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   type FileMetadata = {
@@ -78,6 +84,28 @@ export default function files() {
                 sessionStorage.setItem("aes_public_key", base64Key);
             });
             });
+        }
+    });
+  }, []);
+
+  useEffect(() => {
+    fetch("http://localhost:8080/users/files", {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+            "Content-Type": "application/json"
+        }
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        console.log(data.files);
+        if (Array.isArray(data.files)) {
+            setFiles(
+                data.files.map((file: any) => ({
+                    FileName: file.FileName,
+                    LastModified: file.LastModified
+                }))
+            );
         }
     });
   }, []);
@@ -239,7 +267,7 @@ export default function files() {
                                                         })
                                                     });
                                                     if(response.ok){
-                                                        setFiles(prev => [...prev, ...droppedFiles]);
+                                                        //setFiles(prev => [...prev, ...droppedFiles]);
                                                     }
                                                 } catch (error) {
                                                     console.error('Error fetching /users/upload:', error);
@@ -282,24 +310,28 @@ export default function files() {
                                 {files.map((file, idx) => (
                                     <tr
                                         className={`border-t transition-colors duration-150 hover:bg-blue-800`}
-                                        key={file || idx}
+                                        key={file.FileName || idx}
                                     >
                                         <td className="px-4 py-2">
                                             <input
                                                 type="checkbox"
-                                                checked={selectedFiles.includes(file)}
+                                                checked={selectedFiles.includes(file.FileName)}
                                                 onChange={() => {
                                                     setSelectedFiles(prev =>
-                                                        prev.includes(file)
-                                                            ? prev.filter(f => f !== file)
-                                                            : [...prev, file]
+                                                        prev.includes(file.FileName)
+                                                            ? prev.filter(f => f !== file.FileName)
+                                                            : [...prev, file.FileName]
                                                     );
                                                 }}
                                                 title={`Select file ${file}`}
                                             />
                                         </td>
-                                        <td className="px-4 py-2 text-black">{file}</td>
-                                        <td className="px-4 py-2 text-black">2024-06-10 12:34</td>
+                                        <td className="px-4 py-2 text-black">{file.FileName}</td>
+                                        <td className="px-4 py-2 text-black">
+                                            {file.LastModified
+                                                ? new Date(file.LastModified).toLocaleString()
+                                                : ""}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

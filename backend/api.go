@@ -720,6 +720,64 @@ func uploadUserData(c *gin.Context) {
 	c.Status(200)
 }
 
+func obtainUserFileNames(c *gin.Context) {
+	email, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	db, err := initDynamoDB()
+
+	if err != nil {
+		c.Status(500)
+	}
+
+	emailStr, ok := email.(string)
+	if !ok {
+		c.Status(500)
+		return
+	}
+
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String("file_metadata"),
+		KeyConditionExpression: aws.String("email = :email"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":email": {S: aws.String(emailStr)},
+		},
+		ProjectionExpression: aws.String("originalFileName,lastModified"),
+	}
+
+	result, err := db.Query(input)
+	if err != nil {
+		fmt.Println("Error getting item from DynamoDB:", err)
+		c.Status(500)
+		return
+	}
+	fmt.Println(result)
+
+	type fileDTO struct {
+		FileName     string
+		LastModified string
+	}
+
+	var files []fileDTO
+
+	for _, item := range result.Items {
+		fileNameAttr, ok1 := item["originalFileName"]
+		lastModifiedAttr, ok2 := item["lastModified"]
+		if ok1 && fileNameAttr.S != nil && ok2 && lastModifiedAttr.S != nil {
+			fileObj := fileDTO{
+				FileName:     *fileNameAttr.S,
+				LastModified: *lastModifiedAttr.S,
+			}
+			files = append(files, fileObj)
+		}
+	}
+
+	c.IndentedJSON(200, gin.H{"files": files})
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -738,5 +796,6 @@ func main() {
 	router.POST("/signatures/verify", AuthMiddleware(), verifySignature)
 	router.GET("/users/authorize", AuthMiddleware(), authorizeUser)
 	router.POST("/users/upload", AuthMiddleware(), uploadUserData)
+	router.GET("/users/files", AuthMiddleware(), obtainUserFileNames)
 	router.Run("localhost:8080")
 }
