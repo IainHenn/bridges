@@ -34,6 +34,24 @@ export default function files() {
     encryptedFile?: string;
   };
 
+  const downloadFiles = () => {
+    console.log(selectedFiles);
+    fetch("http://localhost:8080/users/files", {
+        method: "POST", 
+        credentials: "include", 
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            selectedFiles
+        })
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        console.log(data);
+    });
+  }
+
   const selectAllFiles = () => {
 
     if(selectAll == false){
@@ -130,7 +148,8 @@ export default function files() {
                 }}
             />
         </label>
-        <button className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full">
+        <button className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full"
+            onClick={downloadFiles}>
             Download
         </button>
     </div>

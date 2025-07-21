@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -778,6 +779,122 @@ func obtainUserFileNames(c *gin.Context) {
 	c.IndentedJSON(200, gin.H{"files": files})
 }
 
+func fetchUserFiles(c *gin.Context) {
+	email, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	type Files struct {
+		FileNameList []string `json:"selectedFiles"`
+	}
+
+	var filesReq Files
+
+	err := c.BindJSON(&filesReq)
+
+	fmt.Println(filesReq)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+
+	if err != nil {
+		c.Status(500)
+	}
+
+	emailStr, ok := email.(string)
+	if !ok {
+		c.Status(500)
+		return
+	}
+
+	var keys []map[string]*dynamodb.AttributeValue
+	for _, fileName := range filesReq.FileNameList {
+		keys = append(keys, map[string]*dynamodb.AttributeValue{
+			"email":            {S: aws.String(emailStr)},
+			"originalFileName": {S: aws.String(fileName)},
+		})
+	}
+
+	input := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]*dynamodb.KeysAndAttributes{
+			"file_metadata": {
+				Keys:                 keys,
+				ProjectionExpression: aws.String("originalFileName, s3Path"),
+			},
+		},
+	}
+
+	result, err := db.BatchGetItem(input)
+	if err != nil {
+		fmt.Println("Error getting item from DynamoDB:", err)
+		c.Status(500)
+		return
+	}
+	fmt.Println(result)
+
+	type fileDTO struct {
+		FileName      string
+		EncryptedFile string
+	}
+
+	var files []fileDTO
+
+	for _, items := range result.Responses {
+		for _, item := range items {
+			fileNameAttr, ok1 := item["originalFileName"]
+			s3PathAttr, ok2 := item["s3Path"]
+			if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil {
+				awsRegion := os.Getenv("AWS_REGION")
+				s3Bucket := os.Getenv("S3_BUCKET")
+				sess, err := session.NewSession(&aws.Config{
+					Region: aws.String(awsRegion),
+				})
+
+				if err != nil {
+					fmt.Println("Failed to create AWS session:", err)
+					return
+				}
+
+				s3Client := s3.New(sess)
+				input := &s3.GetObjectInput{
+					Bucket: aws.String(s3Bucket),
+					Key:    aws.String(*s3PathAttr.S),
+				}
+
+				result, err := s3Client.GetObject(input)
+				if err != nil {
+					// handle error
+					log.Fatalf("Failed to get object: %v", err)
+				}
+				defer result.Body.Close()
+
+				// Read the object data
+				data, err := io.ReadAll(result.Body)
+				if err != nil {
+					// handle error
+					log.Fatalf("Failed to read object data: %v", err)
+				}
+
+				strFile := string(data)
+
+				fileObj := fileDTO{
+					FileName:      *fileNameAttr.S,
+					EncryptedFile: strFile,
+				}
+				files = append(files, fileObj)
+			}
+		}
+	}
+
+	c.IndentedJSON(200, gin.H{"files": files})
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -797,5 +914,6 @@ func main() {
 	router.GET("/users/authorize", AuthMiddleware(), authorizeUser)
 	router.POST("/users/upload", AuthMiddleware(), uploadUserData)
 	router.GET("/users/files", AuthMiddleware(), obtainUserFileNames)
+	router.POST("users/files", AuthMiddleware(), fetchUserFiles)
 	router.Run("localhost:8080")
 }
