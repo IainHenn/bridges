@@ -822,6 +822,7 @@ func fetchUserFiles(c *gin.Context) {
 		type fileDTO struct {
 			FileName      string
 			EncryptedFile string
+			FileType      string
 		}
 
 		var files []fileDTO
@@ -864,7 +865,7 @@ func fetchUserFiles(c *gin.Context) {
 				RequestItems: map[string]*dynamodb.KeysAndAttributes{
 					"file_metadata": {
 						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path"),
+						ProjectionExpression: aws.String("originalFileName, s3Path, FileType"),
 					},
 				},
 			}
@@ -881,7 +882,8 @@ func fetchUserFiles(c *gin.Context) {
 				for _, item := range items {
 					fileNameAttr, ok1 := item["originalFileName"]
 					s3PathAttr, ok2 := item["s3Path"]
-					if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil {
+					fileTypeAttr, ok3 := item["FileType"]
+					if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil {
 						input := &s3.GetObjectInput{
 							Bucket: aws.String(s3Bucket),
 							Key:    aws.String(*s3PathAttr.S),
@@ -905,6 +907,7 @@ func fetchUserFiles(c *gin.Context) {
 
 						fileObj := fileDTO{
 							FileName:      *fileNameAttr.S,
+							FileType:      *fileTypeAttr.S,
 							EncryptedFile: strFile,
 						}
 						files = append(files, fileObj)
@@ -927,7 +930,7 @@ func fetchUserFiles(c *gin.Context) {
 			RequestItems: map[string]*dynamodb.KeysAndAttributes{
 				"file_metadata": {
 					Keys:                 keys,
-					ProjectionExpression: aws.String("originalFileName, s3Path"),
+					ProjectionExpression: aws.String("originalFileName, s3Path, FileType"),
 				},
 			},
 		}
@@ -943,6 +946,7 @@ func fetchUserFiles(c *gin.Context) {
 		type fileDTO struct {
 			FileName      string
 			EncryptedFile string
+			FileType      string
 		}
 
 		var files []fileDTO
@@ -964,7 +968,8 @@ func fetchUserFiles(c *gin.Context) {
 			for _, item := range items {
 				fileNameAttr, ok1 := item["originalFileName"]
 				s3PathAttr, ok2 := item["s3Path"]
-				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil {
+				fileTypeAttr, ok3 := item["FileType"]
+				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil {
 					input := &s3.GetObjectInput{
 						Bucket: aws.String(s3Bucket),
 						Key:    aws.String(*s3PathAttr.S),
@@ -988,6 +993,7 @@ func fetchUserFiles(c *gin.Context) {
 
 					fileObj := fileDTO{
 						FileName:      *fileNameAttr.S,
+						FileType:      *fileTypeAttr.S,
 						EncryptedFile: strFile,
 					}
 					files = append(files, fileObj)

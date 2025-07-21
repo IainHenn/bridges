@@ -50,6 +50,77 @@ export default function files() {
     .then(resp => resp.json())
     .then(data => {
         console.log(data);
+        data.files.forEach( async (file: any) => {
+            const { encryptedfile, iv, encryptedAesKey, fileType, FileName } = file;
+
+            // Helper to convert base64 to ArrayBuffer
+            function base64ToArrayBuffer(base64: string): ArrayBuffer {
+                const binaryString = window.atob(base64);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                return bytes.buffer;
+            }
+
+            // Get user's private RSA key from sessionStorage (assume it's stored as base64 PKCS8)
+            const publicKeyBase64 = sessionStorage.getItem("aes_public_key");
+            if (!publicKeyBase64) {
+                alert("No public key found in sessionStorage.");
+                return;
+            }
+            console.log("A");
+            const privateKey = await window.crypto.subtle.importKey(
+                "spki",
+                base64ToArrayBuffer(publicKeyBase64),
+                {
+                    name: "RSA-OAEP",
+                    hash: "SHA-256"
+                },
+                false,
+                ["decrypt"]
+            );
+            console.log("B");
+            // Decrypt AES key with RSA private key
+            const aesKeyRaw = await window.crypto.subtle.decrypt(
+                { name: "RSA-OAEP" },
+                privateKey,
+                base64ToArrayBuffer(encryptedAesKey)
+            );
+            console.log("C");
+            // Import decrypted AES key
+            const aesKey = await window.crypto.subtle.importKey(
+                "raw",
+                aesKeyRaw,
+                { name: "AES-GCM" },
+                false,
+                ["decrypt"]
+            );
+            console.log("D");
+            // Decrypt file data with AES key
+            const decryptedContent = await window.crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: base64ToArrayBuffer(iv)
+                },
+                aesKey,
+                base64ToArrayBuffer(encryptedfile)
+            );
+            console.log("E");
+            // Download the decrypted file
+            const blob = new Blob([decryptedContent], { type: fileType || "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = FileName || "downloaded_file";
+            document.body.appendChild(a);
+            a.click();
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+        });
     });
   }
 
