@@ -9,7 +9,7 @@ export default function files() {
 
   type FilePreview = {
     FileName: string
-    LastModified: Date
+    LastModified: string
   }
   
   const router = useRouter();
@@ -88,8 +88,7 @@ export default function files() {
     });
   }, []);
 
-  useEffect(() => {
-    fetch("http://localhost:8080/users/files", {
+  const fetchFiles = () => fetch("http://localhost:8080/users/files", {
         method: 'GET',
         credentials: 'include',
         headers: {
@@ -108,6 +107,9 @@ export default function files() {
             );
         }
     });
+
+  useEffect(() => {
+    fetchFiles();
   }, []);
 
 
@@ -267,7 +269,7 @@ export default function files() {
                                                         })
                                                     });
                                                     if(response.ok){
-                                                        //setFiles(prev => [...prev, ...droppedFiles]);
+                                                        fetchFiles();
                                                     }
                                                 } catch (error) {
                                                     console.error('Error fetching /users/upload:', error);
@@ -328,9 +330,10 @@ export default function files() {
                                         </td>
                                         <td className="px-4 py-2 text-black">{file.FileName}</td>
                                         <td className="px-4 py-2 text-black">
-                                            {file.LastModified
-                                                ? new Date(file.LastModified).toLocaleString()
-                                                : ""}
+                                            {file.LastModified && !isNaN(new Date(file.LastModified).getTime())
+                                            ? new Date(file.LastModified).toLocaleString()
+                                            : "loading..."
+                                            }
                                         </td>
                                     </tr>
                                 ))}
