@@ -37,7 +37,7 @@ export default function files() {
   const selectAllFiles = () => {
 
     if(selectAll == false){
-        setSelectedFiles(files);
+        setSelectedFiles(files.map(f => f.FileName));
         setSelectAll(true);
     }
     else {
