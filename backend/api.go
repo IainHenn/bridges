@@ -942,23 +942,24 @@ func fetchUserFiles(c *gin.Context) {
 
 		var files []fileDTO
 
+		awsRegion := os.Getenv("AWS_REGION")
+		s3Bucket := os.Getenv("S3_BUCKET")
+		sess, err := session.NewSession(&aws.Config{
+			Region: aws.String(awsRegion),
+		})
+
+		if err != nil {
+			fmt.Println("Failed to create AWS session:", err)
+			return
+		}
+
+		s3Client := s3.New(sess)
+
 		for _, items := range result.Responses {
 			for _, item := range items {
 				fileNameAttr, ok1 := item["originalFileName"]
 				s3PathAttr, ok2 := item["s3Path"]
 				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil {
-					awsRegion := os.Getenv("AWS_REGION")
-					s3Bucket := os.Getenv("S3_BUCKET")
-					sess, err := session.NewSession(&aws.Config{
-						Region: aws.String(awsRegion),
-					})
-
-					if err != nil {
-						fmt.Println("Failed to create AWS session:", err)
-						return
-					}
-
-					s3Client := s3.New(sess)
 					input := &s3.GetObjectInput{
 						Bucket: aws.String(s3Bucket),
 						Key:    aws.String(*s3PathAttr.S),
