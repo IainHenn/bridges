@@ -32,6 +32,7 @@ export default function files() {
     iv?: string;
     encryptedAesKey?: string;
     encryptedFile?: string;
+    fileType?: string;
   };
 
   const downloadFiles = () => {
@@ -204,6 +205,7 @@ export default function files() {
                                             const encoder = new TextEncoder();
                                             const ivBytes = window.crypto.getRandomValues(new Uint8Array(12));
                                             const fileBlob = new Blob([file]);
+                                            const fileType = file.type;
 
                                             const aesKey = await window.crypto.subtle.generateKey(
                                                 {
@@ -267,7 +269,8 @@ export default function files() {
                                                 ...file_metadata,
                                                 iv: iv,
                                                 encryptedAesKey: encryptedAesKey,
-                                                encryptedFile: encryptedFile
+                                                encryptedFile: encryptedFile,
+                                                fileType: fileType
                                             }
                                             fileMetadatas.push(file_metadata);
 

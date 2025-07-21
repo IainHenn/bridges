@@ -559,6 +559,7 @@ func uploadUserData(c *gin.Context) {
 		Iv              string `json:"iv"`
 		EncryptedAesKey string `json:"encryptedAesKey"`
 		EncryptedFile   string `json:"encryptedFile"`
+		FileType        string `json:"fileType"`
 	}
 
 	var req struct {
@@ -653,11 +654,12 @@ func uploadUserData(c *gin.Context) {
 					"email":            {S: aws.String(email)},
 					"originalFileName": {S: aws.String(fileMetadatas[i].FullPath)},
 				},
-				UpdateExpression: aws.String("SET lastModified = :lm, iv = :iv, EncryptedAesKey = :eak"),
+				UpdateExpression: aws.String("SET lastModified = :lm, iv = :iv, EncryptedAesKey = :eak, FileType = :ft"),
 				ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
 					":lm":  {S: aws.String(fileMetadatas[i].UploadDate)},
 					":iv":  {S: aws.String(fileMetadatas[i].Iv)},
 					":eak": {S: aws.String(fileMetadatas[i].EncryptedAesKey)},
+					":ft":  {S: aws.String(fileMetadatas[i].FileType)},
 				},
 			}
 
@@ -703,6 +705,9 @@ func uploadUserData(c *gin.Context) {
 					},
 					"EncryptedAesKey": {
 						S: aws.String(fileMetadatas[i].EncryptedAesKey),
+					},
+					"FileType": {
+						S: aws.String(fileMetadatas[i].FileType),
 					},
 					"s3Path": {
 						S: aws.String(fmt.Sprintf("user_data/%s/%s", email, encPath)),
@@ -1013,6 +1018,6 @@ func main() {
 	router.GET("/users/authorize", AuthMiddleware(), authorizeUser)
 	router.POST("/users/upload", AuthMiddleware(), uploadUserData)
 	router.GET("/users/files", AuthMiddleware(), obtainUserFileNames)
-	router.POST("users/files", AuthMiddleware(), fetchUserFiles)
+	router.POST("/users/files", AuthMiddleware(), fetchUserFiles)
 	router.Run("localhost:8080")
 }
