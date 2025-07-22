@@ -233,14 +233,16 @@ func loginUser(c *gin.Context) {
 func signupUser(c *gin.Context) {
 
 	type User struct {
-		Email        string `json:"email"`
-		Password     string `json:"password"`
-		Salt         string `json:"salt"`
-		Nonce        string `json:"nonce"`
-		EncryptedKey string `json:"encryptedKey"`
-		PublicKey    string `json:"publicKey"`
+		Email           string `json:"email"`
+		Password        string `json:"password"`
+		Salt            string `json:"salt"`
+		Nonce           string `json:"nonce"`
+		EncryptedKey    string `json:"encryptedKey"`
+		PublicKey       string `json:"publicKey"`
+		PublicKeyEncDec string `json:"publicKeyEncDec"`
 	}
 
+	fmt.Println("hihihi")
 	var userReq User
 
 	err := c.BindJSON(&userReq)
@@ -252,12 +254,14 @@ func signupUser(c *gin.Context) {
 	db, err := getDBAccess()
 
 	if err != nil {
+		fmt.Println("in here")
 		c.Status(500) // Server issue on db
 		return
 	}
 
 	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(userReq.Password), 10)
 	if err != nil {
+		fmt.Println("over here")
 		c.Status(500)
 	}
 	hashedPassword := string(hashedPasswordBytes)
@@ -273,9 +277,11 @@ func signupUser(c *gin.Context) {
 			pub_key, 
 			encrypted_key, 
 			salt, 
-			nonce)  
-		VALUES ($1, $2, $3, $4, $5, $6)`, userReq.Email, hashedPassword, userReq.PublicKey, userReq.EncryptedKey, userReq.Salt, userReq.Nonce)
+			nonce,
+			pub_key_enc_dec)  
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`, userReq.Email, hashedPassword, userReq.PublicKey, userReq.EncryptedKey, userReq.Salt, userReq.Nonce, userReq.PublicKeyEncDec)
 		if err != nil {
+			fmt.Println(err)
 			c.Status(500)
 			return
 		}
@@ -308,6 +314,7 @@ func signupUser(c *gin.Context) {
 		c.Status(201)
 		return
 	} else if err != nil {
+		fmt.Println("way over here")
 		c.Status(500)
 		return
 	} else {

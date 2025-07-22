@@ -11,6 +11,7 @@ export default function SignUp() {
 
   const router = useRouter();
   const [url, setUrl] = useState<string | null>(null);
+  const [encDecUrl, setEncDecUrl] = useState<string | null>(null);
 
   // Helper to convert base64 to ArrayBuffer
   function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -146,6 +147,25 @@ export default function SignUp() {
     const salt = arrayBufferToBase64(saltBytes.buffer);
     const nonce = arrayBufferToBase64(nonceBytes.buffer);
     const encryptedKey = arrayBufferToBase64(encryptedKeyBuffer);
+
+    const keyPairEncDec = await crypto.subtle.generateKey(
+      {
+        name: "RSA-OAEP",
+        modulusLength: 4096,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["encrypt", "decrypt"]
+    );
+
+    const exportedPublicKey = await crypto.subtle.exportKey("spki", keyPairEncDec.publicKey);
+    const exportedPrivateKey = await crypto.subtle.exportKey("pkcs8", keyPairEncDec.privateKey);
+
+    // 4. Convert to base64 for easier storage/transmission
+    const publicKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedPublicKey)));
+    const privateKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(exportedPrivateKey)));
+
     try {
       const response = await fetch("http://localhost:8080/users", {
         method: "POST",
@@ -154,11 +174,11 @@ export default function SignUp() {
           "salt": salt,
           "nonce": nonce,
           "encryptedKey": encryptedKey,
-          "publicKey": publicKey})
+          "publicKey": publicKey,
+          "publicKeyEncDec": publicKeyBase64})
       });
 
       if (response.status === 201) {
-
         if (encryptedKey && salt && nonce) {
           const fileContent = JSON.stringify({
             salt,
@@ -167,6 +187,8 @@ export default function SignUp() {
           });
           const blob = new Blob([fileContent], { type: "application/json" });
           setUrl(URL.createObjectURL(blob));
+          const blobEncDec = new Blob([JSON.stringify({privateKeyBase64})], { type: "application/json" });
+          setEncDecUrl(URL.createObjectURL(blobEncDec));
         }
       } else {
         console.log(`Failed to create user: ${response.status}`);
@@ -175,6 +197,7 @@ export default function SignUp() {
       console.error("Error:", error);
     }
   };
+  
   const sss = () => {
     router.push('/signup');
   }
@@ -239,7 +262,16 @@ export default function SignUp() {
           download="privateKey.txt"
           className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition w-full mt-4 flex justify-center items-center"
           >
-          Download Private Key
+          Download Private Key (Can't login without it!)
+          </a>
+        )}
+        {encDecUrl && (
+          <a
+          href={encDecUrl}
+          download="privateKey_enc_dec.txt"
+          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition w-full mt-4 flex justify-center items-center"
+          >
+          Download Private Key (Can't download files without it!)
           </a>
         )}
       </div>

@@ -72,7 +72,7 @@ export default function files() {
             }
             console.log("A");
             const privateKey = await window.crypto.subtle.importKey(
-                "spki",
+                "pkcs8",
                 base64ToArrayBuffer(publicKeyBase64),
                 {
                     name: "RSA-OAEP",
