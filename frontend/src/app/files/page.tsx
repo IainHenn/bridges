@@ -16,6 +16,8 @@ export default function files() {
   const [files, setFiles] = useState<FilePreview[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
+  const [publicKeyEncDec, setPublicKeyEncDec] = useState("");
+  const [privateKeyEncDec, setPrivateKeyEncDec] = useState("");
   type FileMetadata = {
     fullPath: string;
     uploadDate: Date;
@@ -35,11 +37,11 @@ export default function files() {
     fileType?: string;
   };
 
-  const downloadFiles = () => {
+const downloadFiles = () => {
     console.log(selectedFiles);
     fetch("http://localhost:8080/users/files", {
-        method: "POST", 
-        credentials: "include", 
+        method: "POST",
+        credentials: "include",
         headers: {
             'Content-Type': 'application/json'
         },
@@ -47,82 +49,94 @@ export default function files() {
             selectedFiles
         })
     })
-    .then(resp => resp.json())
-    .then(data => {
-        console.log(data);
-        data.files.forEach( async (file: any) => {
-            const { encryptedfile, iv, encryptedAesKey, fileType, FileName } = file;
+        .then(resp => resp.json())
+        .then(data => {
+            console.log("data");
+            console.dir(data);
+            data.files.forEach(async (file: any) => {
+                console.log(`privateKeyEncDec: ${privateKeyEncDec}`);
+                const { EncryptedFile, Iv, EncryptedAesKey, FileType, FileName } = file;
+                console.log("encryptedfile:", EncryptedFile);
+                console.log("iv:", Iv);
+                console.log("encryptedAesKey:", EncryptedAesKey);
+                console.log("fileType:", FileType);
+                console.log("FileName:", FileName);
 
-            // Helper to convert base64 to ArrayBuffer
-            function base64ToArrayBuffer(base64: string): ArrayBuffer {
-                const binaryString = window.atob(base64);
-                const len = binaryString.length;
-                const bytes = new Uint8Array(len);
-                for (let i = 0; i < len; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
+                // Helper to convert base64 to ArrayBuffer
+                function base64ToArrayBuffer(base64: string): ArrayBuffer {
+                    const binaryString = window.atob(base64);
+                    const len = binaryString.length;
+                    const bytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    return bytes.buffer;
                 }
-                return bytes.buffer;
-            }
 
-            // Get user's private RSA key from sessionStorage (assume it's stored as base64 PKCS8)
-            const publicKeyBase64 = sessionStorage.getItem("aes_public_key");
-            if (!publicKeyBase64) {
-                alert("No public key found in sessionStorage.");
-                return;
-            }
-            console.log("A");
-            const privateKey = await window.crypto.subtle.importKey(
-                "pkcs8",
-                base64ToArrayBuffer(publicKeyBase64),
-                {
-                    name: "RSA-OAEP",
-                    hash: "SHA-256"
-                },
-                false,
-                ["decrypt"]
-            );
-            console.log("B");
-            // Decrypt AES key with RSA private key
-            const aesKeyRaw = await window.crypto.subtle.decrypt(
-                { name: "RSA-OAEP" },
-                privateKey,
-                base64ToArrayBuffer(encryptedAesKey)
-            );
-            console.log("C");
-            // Import decrypted AES key
-            const aesKey = await window.crypto.subtle.importKey(
-                "raw",
-                aesKeyRaw,
-                { name: "AES-GCM" },
-                false,
-                ["decrypt"]
-            );
-            console.log("D");
-            // Decrypt file data with AES key
-            const decryptedContent = await window.crypto.subtle.decrypt(
-                {
-                    name: "AES-GCM",
-                    iv: base64ToArrayBuffer(iv)
-                },
-                aesKey,
-                base64ToArrayBuffer(encryptedfile)
-            );
-            console.log("E");
-            // Download the decrypted file
-            const blob = new Blob([decryptedContent], { type: fileType || "application/octet-stream" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = FileName || "downloaded_file";
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 100);
+                // Get user's private RSA key from state (base64 PKCS8)
+                if (!privateKeyEncDec) {
+                    alert("Please upload your private key first.");
+                    return;
+                }
+
+                try {
+                    // Import the private key
+                    const privateKey = await window.crypto.subtle.importKey(
+                        "pkcs8",
+                        base64ToArrayBuffer(privateKeyEncDec),
+                        {
+                            name: "RSA-OAEP",
+                            hash: "SHA-256"
+                        },
+                        false,
+                        ["decrypt"]
+                    );
+
+                    // Decrypt AES key with RSA private key
+                    const aesKeyRaw = await window.crypto.subtle.decrypt(
+                        { name: "RSA-OAEP" },
+                        privateKey,
+                        base64ToArrayBuffer(EncryptedAesKey)
+                    );
+
+                    // Import decrypted AES key
+                    const aesKey = await window.crypto.subtle.importKey(
+                        "raw",
+                        aesKeyRaw,
+                        { name: "AES-GCM" },
+                        false,
+                        ["decrypt"]
+                    );
+
+                    // Decrypt file data with AES key
+                    const decryptedContent = await window.crypto.subtle.decrypt(
+                        {
+                            name: "AES-GCM",
+                            iv: base64ToArrayBuffer(Iv)
+                        },
+                        aesKey,
+                        base64ToArrayBuffer(EncryptedFile)
+                    );
+
+                    // Download the decrypted file
+                    const blob = new Blob([decryptedContent], { type: FileType || "application/octet-stream" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = FileName || "downloaded_file";
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }, 100);
+                } catch (error) {
+                    alert("Failed to decrypt file. Make sure your private key is correct.");
+                    console.error(error);
+                }
+            });
         });
-    });
-  }
+}
 
   const selectAllFiles = () => {
 
@@ -152,28 +166,78 @@ export default function files() {
         }
     })
     .then(data => {
-        if (!sessionStorage.getItem("aes_public_key")) {
-            window.crypto.subtle.generateKey(
-            {
-                name: "RSA-OAEP",
-                modulusLength: 2048,
-                publicExponent: new Uint8Array([1, 0, 1]),
-                hash: "SHA-256",
-            },
-            true,
-            ["encrypt", "decrypt"]
-            ).then(keyPair => {
-            window.crypto.subtle.exportKey("spki", keyPair.publicKey).then(exportedKey => {
-                // Exported as ArrayBuffer in SPKI format, encode to base64
-                const uint8Array = new Uint8Array(exportedKey);
-                let binary = "";
-                for (let i = 0; i < uint8Array.byteLength; i++) {
-                binary += String.fromCharCode(uint8Array[i]);
+        console.log(data);
+        setPublicKeyEncDec(data.public_key_enc_dec);
+        if (!sessionStorage.getItem("aes_encrypted_key")) {
+            // Encrypt a new AES key with the provided public_key_enc_dec and store it
+            async function generateAndStoreAesKey() {
+            // Generate AES-GCM key
+            const aesKey = await window.crypto.subtle.generateKey(
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+            console.log("A");
+            // Export AES key as raw
+            const rawAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
+            console.log("B");
+            // Convert public_key_enc_dec (base64) to ArrayBuffer
+            function base64ToArrayBuffer(base64: string): ArrayBuffer {
+                const binaryString = window.atob(base64);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
                 }
-                const base64Key = window.btoa(binary);
-                sessionStorage.setItem("aes_public_key", base64Key);
-            });
-            });
+                return bytes.buffer;
+            }
+
+            console.log("C: ", data.public_key_enc_dec);
+
+            // Import RSA public key (spki)
+            const publicKey = await window.crypto.subtle.importKey(
+                "spki",
+                base64ToArrayBuffer(data.public_key_enc_dec),
+                {
+                name: "RSA-OAEP",
+                hash: "SHA-256"
+                },
+                false,
+                ["encrypt"]
+            );
+
+            console.log("D");
+
+            // Encrypt AES key with RSA public key
+            const encryptedAesKey = await window.crypto.subtle.encrypt(
+                { name: "RSA-OAEP" },
+                publicKey,
+                rawAesKey
+            );
+
+            console.log("E");
+
+            // Convert encrypted AES key to base64
+            function arrayBufferToBase64(buffer: ArrayBuffer) {
+                const bytes = new Uint8Array(buffer);
+                let binary = "";
+                for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+                }
+                return window.btoa(binary);
+            }
+
+            console.log("F");
+
+            const encryptedAesKeyBase64 = arrayBufferToBase64(encryptedAesKey);
+
+            console.log("G");
+
+            // Store encrypted AES key in sessionStorage
+            sessionStorage.setItem("aes_encrypted_key", encryptedAesKeyBase64);
+            }
+
+            generateAndStoreAesKey();
         }
     });
   }, []);
@@ -205,7 +269,7 @@ export default function files() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-purple-950">
-    <div className="flex flex-col items-center space-y-4 mr-6 -mt-105">
+    <div className="flex flex-col items-center space-y-4 mr-6 -mt-70">
         <label htmlFor="file-upload" className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full text-center">
             Upload
             <input
@@ -224,6 +288,36 @@ export default function files() {
             onClick={downloadFiles}>
             Download
         </button>
+        <Dropzone
+            accept={{ 'text/plain': ['.txt'] }}
+            maxFiles={1}
+            multiple={false}
+            onDrop={async (acceptedFiles) => {
+            if (acceptedFiles.length === 1) {
+                const file = acceptedFiles[0];
+                const text = await file.text();
+                const json = JSON.parse(text);
+                console.log(json['privateKeyBase64']);
+                setPrivateKeyEncDec(json['privateKeyBase64']);
+            }
+            }}
+        >
+            {({ getRootProps, getInputProps, isDragActive }) => (
+            <div
+                {...getRootProps()}
+                className={`mt-4 px-8 py-6 border-2 border-dashed rounded-xl cursor-pointer w-full text-center transition-colors duration-200 ${
+                isDragActive ? "bg-blue-700 border-blue-400" : "bg-blue-800 border-blue-300"
+                }`}
+            >
+                <input {...getInputProps()} />
+                <span className="text-white text-lg">
+                {isDragActive
+                    ? "Drop your privatekey.txt here..."
+                    : "Drag & drop your privatekey.txt here, or click to select"}
+                </span>
+            </div>
+            )}
+        </Dropzone>
     </div>
       <div className="flex flex-col items-center justify-center bg-blue-500 rounded-2xl shadow-lg p-8 w-[80%] h-150 stext-black">
         <div className="w-full h-full overflow-auto">
@@ -259,7 +353,7 @@ export default function files() {
                                                 const len = binaryString.length;
                                                 const bytes = new Uint8Array(len);
                                                 for (let i = 0; i < len; i++) {
-                                                bytes[i] = binaryString.charCodeAt(i);
+                                                    bytes[i] = binaryString.charCodeAt(i);
                                                 }
                                                 return bytes.buffer;
                                             }
@@ -268,16 +362,42 @@ export default function files() {
                                                 const bytes = new Uint8Array(buffer);
                                                 let binary = "";
                                                 for (let i = 0; i < bytes.byteLength; i++) {
-                                                binary += String.fromCharCode(bytes[i]);
+                                                    binary += String.fromCharCode(bytes[i]);
                                                 }
                                                 return window.btoa(binary);
                                             }
 
-                                            const encoder = new TextEncoder();
                                             const ivBytes = window.crypto.getRandomValues(new Uint8Array(12));
                                             const fileBlob = new Blob([file]);
                                             const fileType = file.type;
 
+                                            // Get the encrypted AES key from sessionStorage
+                                            const aesEncryptedKeyBase64 = sessionStorage.getItem("aes_encrypted_key");
+                                            if (!aesEncryptedKeyBase64) {
+                                                alert("No AES encrypted key found in sessionStorage.");
+                                                pending--;
+                                                return;
+                                            }
+
+                                            // Import the user's public RSA key (from publicKeyEncDec)
+                                            const publicKeyBase64 = publicKeyEncDec;
+                                            if (!publicKeyBase64) {
+                                                alert("No public RSA key found.");
+                                                pending--;
+                                                return;
+                                            }
+                                            const publicKey = await window.crypto.subtle.importKey(
+                                                "spki",
+                                                base64ToArrayBuffer(publicKeyBase64),
+                                                {
+                                                    name: "RSA-OAEP",
+                                                    hash: "SHA-256"
+                                                },
+                                                false,
+                                                ["encrypt"]
+                                            );
+
+                                            // Generate a new AES key for this file
                                             const aesKey = await window.crypto.subtle.generateKey(
                                                 {
                                                     name: "AES-GCM",
@@ -287,6 +407,7 @@ export default function files() {
                                                 ["encrypt", "decrypt"]
                                             );
 
+                                            // Encrypt the file with the AES key
                                             const encryptedData = await window.crypto.subtle.encrypt(
                                                 {
                                                     name: "AES-GCM",
@@ -296,40 +417,12 @@ export default function files() {
                                                 await fileBlob.arrayBuffer()
                                             );
 
-                                            // Encrypt the private key using AES-GCM
-                                            const arrayBuffer = await file.arrayBuffer();
-                                            const encryptedKeyBuffer = await window.crypto.subtle.encrypt(
-                                                {
-                                                    name: "AES-GCM",
-                                                    iv: ivBytes
-                                                },
-                                                aesKey,
-                                                arrayBuffer
-                                            );                                            
-
-                                            // Import the public key string as a CryptoKey
-                                            const aesPublicKeyBase64 = sessionStorage.getItem("aes_public_key");
-                                            if (!aesPublicKeyBase64) {
-                                                throw new Error("aes_public_key not found in sessionStorage");
-                                            }
-
-                                            const importedPublicKey = await window.crypto.subtle.importKey(
-                                                "spki",
-                                                base64ToArrayBuffer(aesPublicKeyBase64),
-                                                {
-                                                    name: "RSA-OAEP",
-                                                    hash: "SHA-256"
-                                                },
-                                                false,
-                                                ["encrypt"]
-                                            );
-
-                                            console.log("after imported public key");
-
-                                            let encryptedAesKeyBuffer = await window.crypto.subtle.encrypt(
+                                            // Export and encrypt the AES key with the user's public RSA key
+                                            const rawAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
+                                            const encryptedAesKeyBuffer = await window.crypto.subtle.encrypt(
                                                 { name: "RSA-OAEP" },
-                                                importedPublicKey,
-                                                await window.crypto.subtle.exportKey("raw", aesKey)
+                                                publicKey,
+                                                rawAesKey
                                             );
 
                                             const iv = arrayBufferToBase64(ivBytes.buffer);
