@@ -5,7 +5,7 @@ import { decodeReply } from "next/dist/server/app-render/entry-base";
 import Dropzone from 'react-dropzone'
 
 
-export default function Dashboard() {
+export default function Validation() {
 
   const router = useRouter();
   const [validated, setValidation] = useState(false);
@@ -193,7 +193,7 @@ export default function Dashboard() {
 
       const verifyData = await verifyResponse.json();
       if (verifyResponse.ok && verifyData.success) {
-        console.log("nice");
+        router.push("/files");
       }
       else{
         console.log(verifyResponse.error);
@@ -202,46 +202,46 @@ export default function Dashboard() {
   }
   
   return (
-    <div className="flex items-center justify-center min-h-screen bg-purple-950">
-      <div className="flex flex-col items-center justify-center bg-blue-500 rounded-2xl shadow-lg p-8 w-[50%] h-85 stext-black">
-      {/* Drag and Drop at the top */}
-      <Dropzone accept={{ 'text/plain': ['.txt'] }} onDrop={handleDrop} multiple={false}>
-        {({ getRootProps, getInputProps, isDragActive }) => (
-        <section>
-          <div
-          {...getRootProps()}
-          className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-8 w-full transition-colors duration-200 ${
-            isDragActive
-            ? "border-purple-700 bg-purple-100"
-            : "border-gray-300 bg-white"
-          } cursor-pointer mb-6`}
-          >
-          <input {...getInputProps()} />
-          <p className="text-lg font-semibold text-gray-700">
-            {isDragActive
-            ? "Drop the files here ..."
-            : (
-              <>
-              Drag 'n drop files here <br /> or <br /> click to select
-              </>
-            )}
-          </p>
-          <p className="text-sm text-gray-500 mt-2">
-            Supported format: txt
-          </p>
-          </div>
-        </section>
-        )}
-      </Dropzone>
-      {/* Inputs and button below */}
-      <input
-        id="validationPhrase"
-        type="password"
-        className="bg-gray-100 text-black placeholder-gray-500 hover:bg-gray-600 hover:placeholder-black rounded-md px-4 py-2 mt-2 focus:outline-none focus:ring-2 focus:ring-blue-400 transition w-full"
-        placeholder="Enter your validation phrase"
-        value={validationPhrase}
-        onChange={e => setValidationPhrase(e.target.value)}
-      />
+    <div className="flex items-center justify-center min-h-screen bg-black">
+      <div className="flex flex-col items-center justify-center bg-black border-2 border-white rounded-none shadow-none p-8 w-[40%] min-w-[350px] font-mono text-white">
+        <Dropzone accept={{ "text/plain": [".txt"] }} onDrop={handleDrop} multiple={false}>
+          {({ getRootProps, getInputProps, isDragActive }) => (
+            <section>
+              <div
+                {...getRootProps()}
+                className={`flex flex-col items-center justify-center border-2 border-dashed rounded-none p-8 w-full transition-colors duration-200 font-mono ${
+                  isDragActive
+                    ? "bg-white border-black text-black"
+                    : "bg-black border-white text-white"
+                } cursor-pointer mb-6`}
+                style={{ letterSpacing: "1px" }}
+              >
+                <input {...getInputProps()} />
+                <p className="text-lg font-mono">
+                  {isDragActive
+                    ? "Drop your privateKey.txt here..."
+                    : (
+                      <>
+                        Drag & drop your privateKey.txt here<br />or click to select
+                      </>
+                    )}
+                </p>
+                <p className="text-sm mt-2 font-mono">
+                  Supported format: txt
+                </p>
+              </div>
+            </section>
+          )}
+        </Dropzone>
+        <input
+          id="validationPhrase"
+          type="password"
+          className="bg-black border-2 border-white text-white font-mono px-4 py-2 mt-2 rounded-none placeholder-gray-400 focus:outline-none focus:border-white focus:bg-black transition-colors w-full"
+          placeholder="Enter your validation phrase"
+          value={validationPhrase}
+          onChange={e => setValidationPhrase(e.target.value)}
+          style={{ letterSpacing: "1px" }}
+        />
       </div>
     </div>
   );
