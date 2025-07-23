@@ -295,277 +295,334 @@ const deleteFiles = () => {
 
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-purple-950">
-    <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
-        <label htmlFor="file-upload" className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full text-center">
-            Upload
-            <input
-                id="file-upload"
-                type="file"
-                className="hidden"
-                // @ts-ignore
-                webkitdirectory="true"
-                onChange={(e) => {
-                    // handle file upload here
-                    console.log(Array.from(e.target.files || []));
-                }}
-            />
-        </label>
-        <button className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full"
-            onClick={downloadFiles}>
-            Download
-        </button>
-        <button className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full"
-            onClick={deleteFiles}>
-            Delete
-        </button>
-        <Dropzone
-            accept={{ 'text/plain': ['.txt'] }}
-            maxFiles={1}
-            multiple={false}
-            onDrop={async (acceptedFiles) => {
-            if (acceptedFiles.length === 1) {
-                const file = acceptedFiles[0];
-                const text = await file.text();
-                const json = JSON.parse(text);
-                console.log(json['privateKeyBase64']);
-                setPrivateKeyEncDec(json['privateKeyBase64']);
-            }
-            }}
-        >
-            {({ getRootProps, getInputProps, isDragActive }) => (
-            <div
-                {...getRootProps()}
-                className={`mt-4 px-8 py-6 border-2 border-dashed rounded-xl cursor-pointer w-full text-center transition-colors duration-200 ${
-                isDragActive ? "bg-blue-700 border-blue-400" : "bg-blue-800 border-blue-300"
-                }`}
+    <div className="flex items-center justify-center min-h-screen bg-black">
+        <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
+            <label
+                htmlFor="file-upload"
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full text-center hover:bg-white hover:text-black transition-colors"
+                style={{ letterSpacing: "2px" }}
             >
-                <input {...getInputProps()} />
-                <span className="text-white text-lg">
-                {isDragActive
-                    ? "Drop your privatekey.txt here..."
-                    : "Drag & drop your privatekey.txt here, or click to select"}
-                </span>
-            </div>
-            )}
-        </Dropzone>
-    </div>
-      <div className="flex flex-col items-center justify-center bg-blue-500 rounded-2xl shadow-lg p-8 w-[80%] h-150 stext-black">
-        <div className="w-full h-full overflow-auto">
+                Upload
+                <input
+                    id="file-upload"
+                    type="file"
+                    className="hidden"
+                    // @ts-ignore
+                    webkitdirectory="true"
+                    onChange={(e) => {
+                        // handle file upload here
+                        console.log(Array.from(e.target.files || []));
+                    }}
+                />
+            </label>
+            <button
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                onClick={downloadFiles}
+                style={{ letterSpacing: "2px" }}
+            >
+                Download
+            </button>
+            <button
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                onClick={deleteFiles}
+                style={{ letterSpacing: "2px" }}
+            >
+                Delete
+            </button>
             <Dropzone
-                noClick
+                accept={{ "text/plain": [".txt"] }}
+                maxFiles={1}
+                multiple={false}
+                onDrop={async (acceptedFiles) => {
+                    if (acceptedFiles.length === 1) {
+                        const file = acceptedFiles[0];
+                        const text = await file.text();
+                        const json = JSON.parse(text);
+                        console.log(json["privateKeyBase64"]);
+                        setPrivateKeyEncDec(json["privateKeyBase64"]);
+                    }
+                }}
             >
-                {({ getRootProps, getInputProps, isDragActive, isDragAccept, isDragReject }) => (
+                {({ getRootProps, getInputProps, isDragActive }) => (
                     <div
-                        {...getRootProps({
-                            onDrop: undefined, // disable Dropzone's default onDrop
-                            onDragOver: (e: React.DragEvent) => e.preventDefault(),
-                            onDrop: (event: React.DragEvent) => {
-                                event.preventDefault();
-                                const items = event.dataTransfer.items;
-                                const droppedFiles: string[] = [];
-                                let pending = 0;
-                                const fileMetadatas: FileMetadata[] = [];
-
-                                function traverseFileTree(item: any, path = "") {
-                                    let uploadStarted = false;
-                                    if (item.isFile) {
-                                        pending++;
-                                        item.file(async (file: File) => {
-                                            let file_metadata = {
-                                                ...file,
-                                                fullPath: path + file.name,
-                                                uploadDate: new Date()                                                
-                                            };
-                                            droppedFiles.push(path + file.name);
-
-                                            function base64ToArrayBuffer(base64: string): ArrayBuffer {
-                                                const binaryString = window.atob(base64);
-                                                const len = binaryString.length;
-                                                const bytes = new Uint8Array(len);
-                                                for (let i = 0; i < len; i++) {
-                                                    bytes[i] = binaryString.charCodeAt(i);
-                                                }
-                                                return bytes.buffer;
-                                            }
-
-                                            function arrayBufferToBase64(buffer: ArrayBuffer) {
-                                                const bytes = new Uint8Array(buffer);
-                                                let binary = "";
-                                                for (let i = 0; i < bytes.byteLength; i++) {
-                                                    binary += String.fromCharCode(bytes[i]);
-                                                }
-                                                return window.btoa(binary);
-                                            }
-
-                                            const ivBytes = window.crypto.getRandomValues(new Uint8Array(12));
-                                            const fileBlob = new Blob([file]);
-                                            const fileType = file.type;
-
-                                            // Get the encrypted AES key from sessionStorage
-                                            const aesEncryptedKeyBase64 = sessionStorage.getItem("aes_encrypted_key");
-                                            if (!aesEncryptedKeyBase64) {
-                                                alert("No AES encrypted key found in sessionStorage.");
-                                                pending--;
-                                                return;
-                                            }
-
-                                            // Import the user's public RSA key (from publicKeyEncDec)
-                                            const publicKeyBase64 = publicKeyEncDec;
-                                            if (!publicKeyBase64) {
-                                                alert("No public RSA key found.");
-                                                pending--;
-                                                return;
-                                            }
-                                            const publicKey = await window.crypto.subtle.importKey(
-                                                "spki",
-                                                base64ToArrayBuffer(publicKeyBase64),
-                                                {
-                                                    name: "RSA-OAEP",
-                                                    hash: "SHA-256"
-                                                },
-                                                false,
-                                                ["encrypt"]
-                                            );
-
-                                            // Generate a new AES key for this file
-                                            const aesKey = await window.crypto.subtle.generateKey(
-                                                {
-                                                    name: "AES-GCM",
-                                                    length: 256,
-                                                },
-                                                true,
-                                                ["encrypt", "decrypt"]
-                                            );
-
-                                            // Encrypt the file with the AES key
-                                            const encryptedData = await window.crypto.subtle.encrypt(
-                                                {
-                                                    name: "AES-GCM",
-                                                    iv: ivBytes,
-                                                },
-                                                aesKey,
-                                                await fileBlob.arrayBuffer()
-                                            );
-
-                                            // Export and encrypt the AES key with the user's public RSA key
-                                            const rawAesKey = await window.crypto.subtle.exportKey("raw", aesKey);
-                                            const encryptedAesKeyBuffer = await window.crypto.subtle.encrypt(
-                                                { name: "RSA-OAEP" },
-                                                publicKey,
-                                                rawAesKey
-                                            );
-
-                                            const iv = arrayBufferToBase64(ivBytes.buffer);
-                                            const encryptedAesKey = arrayBufferToBase64(encryptedAesKeyBuffer);
-                                            const encryptedFile = arrayBufferToBase64(encryptedData);
-
-                                            file_metadata = {
-                                                ...file_metadata,
-                                                iv: iv,
-                                                encryptedAesKey: encryptedAesKey,
-                                                encryptedFile: encryptedFile,
-                                                fileType: fileType
-                                            }
-                                            fileMetadatas.push(file_metadata);
-
-                                            pending--;
-
-                                            if(!uploadStarted && pending === 0){
-                                                uploadStarted = true;
-                                                console.dir(fileMetadatas);
-                                                try {
-                                                    const response = await fetch("http://localhost:8080/users/upload", {
-                                                        method: "POST",
-                                                        credentials: "include",
-                                                        headers: {
-                                                            "Content-Type": "application/json"
-                                                        },
-                                                        body: JSON.stringify({
-                                                            file_metadata: fileMetadatas
-                                                        })
-                                                    });
-                                                    if(response.ok){
-                                                        fetchFiles();
-                                                    }
-                                                } catch (error) {
-                                                    console.error('Error fetching /users/upload:', error);
-                                                }
-                                            }
-                                        });
-                                    } else if (item.isDirectory) {
-                                        const dirReader = item.createReader();
-                                        dirReader.readEntries((entries: any[]) => {
-                                            entries.forEach(entry => traverseFileTree(entry, path + item.name + "/"));
-                                        });
-                                    }
-                                }
-
-                                for (let i = 0; i < items.length; i++) {
-                                    const item = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry();
-                                    if (item) {
-                                        traverseFileTree(item);
-                                    }
-                                }
-                            }
-                        })}
-                        className={`transition-colors duration-200 ${
-                            isDragActive ? "bg-blue-700" : "bg-blue-600"
-                        } min-w-full rounded-lg`}
-                        style={{ cursor: "pointer", position: "relative" }}
+                        {...getRootProps()}
+                        className={`mt-4 px-8 py-6 border-2 border-dashed rounded-none cursor-pointer w-full text-center font-mono transition-colors duration-200 ${
+                            isDragActive
+                                ? "bg-white border-black text-black"
+                                : "bg-black border-white text-white"
+                        }`}
+                        style={{ letterSpacing: "1px" }}
                     >
                         <input {...getInputProps()} />
-                        <table className="min-w-full rounded-lg">
-                            <thead>
-                                <tr>
-                                    <th className="px-4 py-2 text-left">
-                                        <input type="checkbox" onClick={selectAllFiles}/>
-                                    </th>
-                                    <th className="px-4 py-2 text-left text-black">Name</th>
-                                    <th className="px-4 py-2 text-left text-black">Last Modified</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {files.map((file, idx) => (
-                                    <tr
-                                        className={`border-t transition-colors duration-150 hover:bg-blue-800`}
-                                        key={file.FileName || idx}
-                                    >
-                                        <td className="px-4 py-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedFiles.includes(file.FileName)}
-                                                onChange={() => {
-                                                    setSelectedFiles(prev =>
-                                                        prev.includes(file.FileName)
-                                                            ? prev.filter(f => f !== file.FileName)
-                                                            : [...prev, file.FileName]
-                                                    );
-                                                }}
-                                                title={`Select file ${file}`}
-                                            />
-                                        </td>
-                                        <td className="px-4 py-2 text-black">{file.FileName}</td>
-                                        <td className="px-4 py-2 text-black">
-                                            {file.LastModified && !isNaN(new Date(file.LastModified).getTime())
-                                            ? new Date(file.LastModified).toLocaleString()
-                                            : "loading..."
-                                            }
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                        {isDragActive && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-blue-900 bg-opacity-40 rounded-lg pointer-events-none">
-                                <span className="text-white text-lg font-bold">Drop files here...</span>
-                            </div>
-                        )}
+                        <span className="text-lg">
+                            {isDragActive
+                                ? "Drop your privatekey.txt here..."
+                                : "Drag & drop your privatekey.txt here, or click to select"}
+                        </span>
                     </div>
                 )}
             </Dropzone>
         </div>
-      </div>
+        <div className="flex flex-col items-center justify-center bg-black border-2 border-white rounded-none shadow-none p-8 w-[80%] h-150 font-mono text-white">
+            <div className="w-full h-full overflow-auto">
+                <Dropzone noClick>
+                    {({
+                        getRootProps,
+                        getInputProps,
+                        isDragActive,
+                        isDragAccept,
+                        isDragReject,
+                    }) => (
+                        <div
+                            {...getRootProps({
+                                onDrop: undefined, // disable Dropzone's default onDrop
+                                onDragOver: (e: React.DragEvent) => e.preventDefault(),
+                                onDrop: (event: React.DragEvent) => {
+                                    event.preventDefault();
+                                    const items = event.dataTransfer.items;
+                                    const droppedFiles: string[] = [];
+                                    let pending = 0;
+                                    const fileMetadatas: FileMetadata[] = [];
+
+                                    function traverseFileTree(item: any, path = "") {
+                                        let uploadStarted = false;
+                                        if (item.isFile) {
+                                            pending++;
+                                            item.file(async (file: File) => {
+                                                let file_metadata = {
+                                                    ...file,
+                                                    fullPath: path + file.name,
+                                                    uploadDate: new Date(),
+                                                };
+                                                droppedFiles.push(path + file.name);
+
+                                                function base64ToArrayBuffer(base64: string): ArrayBuffer {
+                                                    const binaryString = window.atob(base64);
+                                                    const len = binaryString.length;
+                                                    const bytes = new Uint8Array(len);
+                                                    for (let i = 0; i < len; i++) {
+                                                        bytes[i] = binaryString.charCodeAt(i);
+                                                    }
+                                                    return bytes.buffer;
+                                                }
+
+                                                function arrayBufferToBase64(buffer: ArrayBuffer) {
+                                                    const bytes = new Uint8Array(buffer);
+                                                    let binary = "";
+                                                    for (let i = 0; i < bytes.byteLength; i++) {
+                                                        binary += String.fromCharCode(bytes[i]);
+                                                    }
+                                                    return window.btoa(binary);
+                                                }
+
+                                                const ivBytes = window.crypto.getRandomValues(
+                                                    new Uint8Array(12)
+                                                );
+                                                const fileBlob = new Blob([file]);
+                                                const fileType = file.type;
+
+                                                // Get the encrypted AES key from sessionStorage
+                                                const aesEncryptedKeyBase64 =
+                                                    sessionStorage.getItem("aes_encrypted_key");
+                                                if (!aesEncryptedKeyBase64) {
+                                                    alert(
+                                                        "No AES encrypted key found in sessionStorage."
+                                                    );
+                                                    pending--;
+                                                    return;
+                                                }
+
+                                                // Import the user's public RSA key (from publicKeyEncDec)
+                                                const publicKeyBase64 = publicKeyEncDec;
+                                                if (!publicKeyBase64) {
+                                                    alert("No public RSA key found.");
+                                                    pending--;
+                                                    return;
+                                                }
+                                                const publicKey = await window.crypto.subtle.importKey(
+                                                    "spki",
+                                                    base64ToArrayBuffer(publicKeyBase64),
+                                                    {
+                                                        name: "RSA-OAEP",
+                                                        hash: "SHA-256",
+                                                    },
+                                                    false,
+                                                    ["encrypt"]
+                                                );
+
+                                                // Generate a new AES key for this file
+                                                const aesKey = await window.crypto.subtle.generateKey(
+                                                    {
+                                                        name: "AES-GCM",
+                                                        length: 256,
+                                                    },
+                                                    true,
+                                                    ["encrypt", "decrypt"]
+                                                );
+
+                                                // Encrypt the file with the AES key
+                                                const encryptedData = await window.crypto.subtle.encrypt(
+                                                    {
+                                                        name: "AES-GCM",
+                                                        iv: ivBytes,
+                                                    },
+                                                    aesKey,
+                                                    await fileBlob.arrayBuffer()
+                                                );
+
+                                                // Export and encrypt the AES key with the user's public RSA key
+                                                const rawAesKey = await window.crypto.subtle.exportKey(
+                                                    "raw",
+                                                    aesKey
+                                                );
+                                                const encryptedAesKeyBuffer =
+                                                    await window.crypto.subtle.encrypt(
+                                                        { name: "RSA-OAEP" },
+                                                        publicKey,
+                                                        rawAesKey
+                                                    );
+
+                                                const iv = arrayBufferToBase64(ivBytes.buffer);
+                                                const encryptedAesKey =
+                                                    arrayBufferToBase64(encryptedAesKeyBuffer);
+                                                const encryptedFile =
+                                                    arrayBufferToBase64(encryptedData);
+
+                                                file_metadata = {
+                                                    ...file_metadata,
+                                                    iv: iv,
+                                                    encryptedAesKey: encryptedAesKey,
+                                                    encryptedFile: encryptedFile,
+                                                    fileType: fileType,
+                                                };
+                                                fileMetadatas.push(file_metadata);
+
+                                                pending--;
+
+                                                if (!uploadStarted && pending === 0) {
+                                                    uploadStarted = true;
+                                                    console.dir(fileMetadatas);
+                                                    try {
+                                                        const response = await fetch(
+                                                            "http://localhost:8080/users/upload",
+                                                            {
+                                                                method: "POST",
+                                                                credentials: "include",
+                                                                headers: {
+                                                                    "Content-Type": "application/json",
+                                                                },
+                                                                body: JSON.stringify({
+                                                                    file_metadata: fileMetadatas,
+                                                                }),
+                                                            }
+                                                        );
+                                                        if (response.ok) {
+                                                            fetchFiles();
+                                                        }
+                                                    } catch (error) {
+                                                        console.error(
+                                                            "Error fetching /users/upload:",
+                                                            error
+                                                        );
+                                                    }
+                                                }
+                                            });
+                                        } else if (item.isDirectory) {
+                                            const dirReader = item.createReader();
+                                            dirReader.readEntries((entries: any[]) => {
+                                                entries.forEach((entry) =>
+                                                    traverseFileTree(entry, path + item.name + "/")
+                                                );
+                                            });
+                                        }
+                                    }
+
+                                    for (let i = 0; i < items.length; i++) {
+                                        const item =
+                                            items[i].webkitGetAsEntry && items[i].webkitGetAsEntry();
+                                        if (item) {
+                                            traverseFileTree(item);
+                                        }
+                                    }
+                                },
+                            })}
+                            className={`transition-colors duration-200 ${
+                                isDragActive
+                                    ? "bg-white text-black border-black"
+                                    : "bg-black text-white border-white"
+                            } min-w-full border-2 rounded-none font-mono`}
+                            style={{
+                                cursor: "pointer",
+                                position: "relative",
+                                fontFamily: "monospace",
+                                fontSize: "1rem",
+                            }}
+                        >
+                            <input {...getInputProps()} />
+                            <table className="min-w-full rounded-none font-mono border-separate border-spacing-0">
+                                <thead>
+                                    <tr>
+                                        <th className="px-4 py-2 text-left border-b-2 border-white">
+                                            <input
+                                                type="checkbox"
+                                                onClick={selectAllFiles}
+                                                className="accent-white"
+                                            />
+                                        </th>
+                                        <th className="px-4 py-2 text-left border-b-2 border-white text-white font-mono">
+                                            Name
+                                        </th>
+                                        <th className="px-4 py-2 text-left border-b-2 border-white text-white font-mono">
+                                            Last Modified
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {files.map((file, idx) => (
+                                        <tr
+                                            className={`border-t border-white transition-colors duration-150 hover:bg-white hover:text-black`}
+                                            key={file.FileName || idx}
+                                        >
+                                            <td className="px-4 py-2">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedFiles.includes(file.FileName)}
+                                                    onChange={() => {
+                                                        setSelectedFiles((prev) =>
+                                                            prev.includes(file.FileName)
+                                                                ? prev.filter((f) => f !== file.FileName)
+                                                                : [...prev, file.FileName]
+                                                        );
+                                                    }}
+                                                    title={`Select file ${file}`}
+                                                    className="accent-white"
+                                                />
+                                            </td>
+                                            <td className="px-4 py-2 text-white font-mono">
+                                                {file.FileName}
+                                            </td>
+                                            <td className="px-4 py-2 text-white font-mono">
+                                                {file.LastModified &&
+                                                !isNaN(new Date(file.LastModified).getTime())
+                                                    ? new Date(file.LastModified).toLocaleString()
+                                                    : "loading..."}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {isDragActive && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-80 rounded-none pointer-events-none border-2 border-dashed border-white">
+                                    <span className="text-white text-lg font-bold font-mono">
+                                        Drop files here...
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </Dropzone>
+            </div>
+        </div>
     </div>
   );
 }

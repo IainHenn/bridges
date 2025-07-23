@@ -203,77 +203,85 @@ export default function SignUp() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-purple-950">
+    <div className="flex items-center justify-center min-h-screen bg-black">
       <button
         type="button"
-        className="absolute left-8 top-8 bg-white w-[3%] h-[6%] font-bold text-purple-700 rounded p-2 hover:bg-gray-200 transition"
+        className="absolute left-8 top-8 bg-black border-2 border-white w-12 h-12 flex items-center justify-center p-0 hover:bg-white hover:text-black transition-colors rounded-none"
         onClick={() => router.back()}
         aria-label="Go back"
       >
-        <img src="/left-arrow.svg" alt="Go back" />
+        <img src="/left-arrow.svg" alt="Go back" className="invert" />
       </button>
-      <div className="bg-blue-500 rounded-2xl shadow-lg p-8 w-[30%] h-85 text-black">
-        <div className="flex flex-col space-y-2">
-          <label htmlFor="email" className="text-white font-semibold">
-          Email
-          </label>
-          <input
-          id="email"
-          type="email"
-          className="bg-gray-100 text-black placeholder-gray-500 hover:bg-gray-600 hover:placeholder-black rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
-          placeholder="Enter your email"
-          autoComplete="email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col space-y-2">
-          <label htmlFor="password" className="text-white font-semibold">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            className="bg-gray-100 text-black placeholder-gray-500 hover:bg-gray-600 hover:placeholder-black rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
-            placeholder="Enter your password"
-            autoComplete="current-password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-          />
-          <input
-            id="validationPhrase"
-            type="password"
-            className="bg-gray-100 text-black placeholder-gray-500 hover:bg-gray-600 hover:placeholder-black rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 transition"
-            placeholder="Enter your validation phrase"
-            autoComplete="current-validation-phrase"
-            value={validationPhrase}
-            onChange={e => setValidationPhrase(e.target.value)}
-          />
-        </div>
-        <button
-          onClick={renderSignUp}
-          className="bg-purple-700 hover:bg-purple-800 text-white font-bold py-2 rounded-md transition w-full mt-4"
-        >
-        Sign Up
-        </button>
-        {url && (
-          <a
-          href={url}
-          download="privateKey.txt"
-          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition w-full mt-4 flex justify-center items-center"
+      <div className="bg-black border-2 border-white rounded-none shadow-none p-8 w-[30%] min-w-[350px] font-mono text-white">
+        <form className="flex flex-col space-y-4" onSubmit={renderSignUp}>
+          <div className="flex flex-col space-y-2">
+            <label htmlFor="email" className="text-white font-mono tracking-widest">
+              Email
+            </label>
+            <input
+              id="email"
+              type="email"
+              className="bg-black border-2 border-white text-white font-mono px-4 py-2 rounded-none placeholder-gray-400 focus:outline-none focus:border-white focus:bg-black transition-colors"
+              placeholder="Enter your email"
+              autoComplete="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              style={{ letterSpacing: "1px" }}
+            />
+          </div>
+          <div className="flex flex-col space-y-2">
+            <label htmlFor="password" className="text-white font-mono tracking-widest">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              className="bg-black border-2 border-white text-white font-mono px-4 py-2 rounded-none placeholder-gray-400 focus:outline-none focus:border-white focus:bg-black transition-colors"
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              style={{ letterSpacing: "1px" }}
+            />
+            <input
+              id="validationPhrase"
+              type="password"
+              className="bg-black border-2 border-white text-white font-mono px-4 py-2 rounded-none placeholder-gray-400 focus:outline-none focus:border-white focus:bg-black transition-colors"
+              placeholder="Enter your validation phrase"
+              autoComplete="current-validation-phrase"
+              value={validationPhrase}
+              onChange={e => setValidationPhrase(e.target.value)}
+              style={{ letterSpacing: "1px" }}
+            />
+          </div>
+          <button
+            type="submit"
+            className="bg-black border-2 border-white text-white font-mono font-bold py-2 rounded-none transition-colors w-full mt-2 hover:bg-white hover:text-black"
+            style={{ letterSpacing: "2px" }}
           >
-          Download Private Key (Can't login without it!)
-          </a>
-        )}
-        {encDecUrl && (
-          <a
-          href={encDecUrl}
-          download="privateKey_enc_dec.txt"
-          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition w-full mt-4 flex justify-center items-center"
-          >
-          Download Private Key (Can't download files without it!)
-          </a>
-        )}
+            Sign Up
+          </button>
+          {url && (
+            <a
+              href={url}
+              download="privateKey.txt"
+              className="bg-black border-2 border-green-500 text-green-400 font-mono font-bold py-2 rounded-none transition-colors w-full mt-2 flex justify-center items-center hover:bg-green-500 hover:text-black"
+              style={{ letterSpacing: "1px" }}
+            >
+              Download Private Key (Can't login without it!)
+            </a>
+          )}
+          {encDecUrl && (
+            <a
+              href={encDecUrl}
+              download="privateKey_enc_dec.txt"
+              className="bg-black border-2 border-green-500 text-green-400 font-mono font-bold py-2 rounded-none transition-colors w-full mt-2 flex justify-center items-center hover:bg-green-500 hover:text-black"
+              style={{ letterSpacing: "1px" }}
+            >
+              Download Private Key (Can't download files without it!)
+            </a>
+          )}
+        </form>
       </div>
     </div>
   );
