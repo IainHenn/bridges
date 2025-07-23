@@ -202,7 +202,6 @@ const downloadFiles = async () => {
                 }, 100);
             }
         } catch (error) {
-            alert("Failed to decrypt file. Make sure your private key is correct.");
             console.error(error);
         } finally {
             
