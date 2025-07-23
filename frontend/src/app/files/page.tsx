@@ -297,17 +297,12 @@ const deleteFiles = () => {
   return (
     <div className="flex items-center justify-center min-h-screen bg-black">
         <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
-            <label
-                htmlFor="file-upload"
-                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full text-center hover:bg-white hover:text-black transition-colors"
-                style={{ letterSpacing: "2px" }}
-            >
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
                 onClick={downloadFiles}
                 style={{ letterSpacing: "2px" }}
             >
-                Download
+            Download
             </button>
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
