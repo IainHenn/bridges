@@ -815,10 +815,16 @@ func fetchUserFiles(c *gin.Context) {
 		return
 	}
 
+	if len(filesReq.FileNameList) == 0 {
+		c.Status(400)
+		return
+	}
+
 	db, err := initDynamoDB()
 
 	if err != nil {
 		c.Status(500)
+		return
 	}
 
 	emailStr, ok := email.(string)
@@ -851,7 +857,7 @@ func fetchUserFiles(c *gin.Context) {
 		})
 
 		if err != nil {
-			fmt.Println("Failed to create AWS session:", err)
+			c.Status(500)
 			return
 		}
 
@@ -1026,6 +1032,212 @@ func fetchUserFiles(c *gin.Context) {
 	}
 }
 
+func deleteUserFiles(c *gin.Context) {
+	email, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	type Files struct {
+		FileNameList []string `json:"selectedFiles"`
+	}
+
+	var filesReq Files
+
+	err := c.BindJSON(&filesReq)
+
+	fmt.Println(filesReq)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	if len(filesReq.FileNameList) == 0 {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	emailStr, ok := email.(string)
+	if !ok {
+		c.Status(500)
+		return
+	}
+
+	awsRegion := os.Getenv("AWS_REGION")
+	s3Bucket := os.Getenv("S3_BUCKET")
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(awsRegion),
+	})
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	s3Client := s3.New(sess)
+
+	var files []string
+
+	if len(filesReq.FileNameList) > 25 {
+		remainder := len(filesReq.FileNameList) % 25
+		groups := (len(filesReq.FileNameList) / 25)
+
+		if remainder != 0 {
+			groups += 1
+		}
+
+		for i := 0; i < groups; i++ {
+			start := i * 25
+			end := start + 25
+
+			if end > len(filesReq.FileNameList) {
+				end = len(filesReq.FileNameList)
+			}
+			var keys []map[string]*dynamodb.AttributeValue
+			for _, fileName := range filesReq.FileNameList[start:end] {
+				keys = append(keys, map[string]*dynamodb.AttributeValue{
+					"email":            {S: aws.String(emailStr)},
+					"originalFileName": {S: aws.String(fileName)},
+				})
+			}
+
+			input := &dynamodb.BatchGetItemInput{
+				RequestItems: map[string]*dynamodb.KeysAndAttributes{
+					"file_metadata": {
+						Keys:                 keys,
+						ProjectionExpression: aws.String("originalFileName, s3Path"),
+					},
+				},
+			}
+
+			result, err := db.BatchGetItem(input)
+			if err != nil {
+				fmt.Println("Error getting item from DynamoDB:", err)
+				c.Status(500)
+				return
+			}
+
+			writeRequests := make([]*dynamodb.WriteRequest, len(keys))
+			for i, key := range keys {
+				writeRequests[i] = &dynamodb.WriteRequest{
+					DeleteRequest: &dynamodb.DeleteRequest{
+						Key: key,
+					},
+				}
+			}
+
+			deleteInput := &dynamodb.BatchWriteItemInput{
+				RequestItems: map[string][]*dynamodb.WriteRequest{
+					"file_metadata": writeRequests,
+				},
+			}
+
+			_, err = db.BatchWriteItem(deleteInput)
+			if err != nil {
+				c.Status(500)
+				return
+			}
+
+			for _, items := range result.Responses {
+				for _, item := range items {
+					s3PathAttr, ok := item["s3Path"]
+					originalFileNameAttr, ok2 := item["originalFileName"]
+					if ok && s3PathAttr.S != nil && ok2 && originalFileNameAttr.S != nil {
+						input := &s3.DeleteObjectInput{
+							Bucket: aws.String(s3Bucket),
+							Key:    aws.String(*s3PathAttr.S),
+						}
+
+						_, err := s3Client.DeleteObject(input)
+						if err != nil {
+							c.Status(500)
+							return
+						}
+
+						files = append(files, *originalFileNameAttr.S)
+					}
+				}
+			}
+		}
+		c.IndentedJSON(200, gin.H{"files": files})
+	} else {
+		var keys []map[string]*dynamodb.AttributeValue
+		for _, fileName := range filesReq.FileNameList {
+			keys = append(keys, map[string]*dynamodb.AttributeValue{
+				"email":            {S: aws.String(emailStr)},
+				"originalFileName": {S: aws.String(fileName)},
+			})
+		}
+
+		input := &dynamodb.BatchGetItemInput{
+			RequestItems: map[string]*dynamodb.KeysAndAttributes{
+				"file_metadata": {
+					Keys:                 keys,
+					ProjectionExpression: aws.String("originalFileName, s3Path"),
+				},
+			},
+		}
+
+		result, err := db.BatchGetItem(input)
+		if err != nil {
+			fmt.Println("Error getting item from DynamoDB:", err)
+			c.Status(500)
+			return
+		}
+
+		writeRequests := make([]*dynamodb.WriteRequest, len(keys))
+		for i, key := range keys {
+			writeRequests[i] = &dynamodb.WriteRequest{
+				DeleteRequest: &dynamodb.DeleteRequest{
+					Key: key,
+				},
+			}
+		}
+
+		deleteInput := &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]*dynamodb.WriteRequest{
+				"file_metadata": writeRequests,
+			},
+		}
+
+		_, err = db.BatchWriteItem(deleteInput)
+		if err != nil {
+			c.Status(500)
+			return
+		}
+
+		for _, items := range result.Responses {
+			for _, item := range items {
+				originalFileNameAttr, ok1 := item["originalFileName"]
+				s3PathAttr, ok2 := item["s3Path"]
+				if ok1 && originalFileNameAttr.S != nil && ok2 && s3PathAttr.S != nil {
+					input := &s3.DeleteObjectInput{
+						Bucket: aws.String(s3Bucket),
+						Key:    aws.String(*s3PathAttr.S),
+					}
+
+					_, err := s3Client.DeleteObject(input)
+					if err != nil {
+						c.Status(500)
+						return
+					}
+					files = append(files, *originalFileNameAttr.S)
+				}
+			}
+		}
+		c.IndentedJSON(200, gin.H{"files": files})
+	}
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -1046,5 +1258,6 @@ func main() {
 	router.POST("/users/upload", AuthMiddleware(), uploadUserData)
 	router.GET("/users/files", AuthMiddleware(), obtainUserFileNames)
 	router.POST("/users/files", AuthMiddleware(), fetchUserFiles)
+	router.DELETE("/users/files", AuthMiddleware(), deleteUserFiles)
 	router.Run("localhost:8080")
 }

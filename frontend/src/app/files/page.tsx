@@ -138,6 +138,33 @@ const downloadFiles = () => {
         });
 }
 
+const deleteFiles = () => {
+    fetch("http://localhost:8080/users/files", {
+        method: "DELETE",
+        credentials: "include",
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            selectedFiles
+        })
+    })
+    .then(resp => {
+        if(!resp.ok){
+            console.log("bad");
+            return;
+        }
+        return resp.json();
+    })
+    .then(data => {
+        if (data && Array.isArray(data.files)) {
+            setFiles(prevFiles =>
+            prevFiles.filter(filePreview => !data.files.includes(filePreview.FileName))
+            );
+        }
+    })
+}
+
   const selectAllFiles = () => {
 
     if(selectAll == false){
@@ -269,7 +296,7 @@ const downloadFiles = () => {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-purple-950">
-    <div className="flex flex-col items-center space-y-4 mr-6 -mt-70">
+    <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
         <label htmlFor="file-upload" className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full text-center">
             Upload
             <input
@@ -287,6 +314,10 @@ const downloadFiles = () => {
         <button className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full"
             onClick={downloadFiles}>
             Download
+        </button>
+        <button className="px-12 py-6 text-2xl bg-blue-800 hover:bg-blue-900 text-white rounded-xl shadow-lg cursor-pointer w-full"
+            onClick={deleteFiles}>
+            Delete
         </button>
         <Dropzone
             accept={{ 'text/plain': ['.txt'] }}
