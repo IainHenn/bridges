@@ -203,8 +203,6 @@ const downloadFiles = async () => {
             }
         } catch (error) {
             console.error(error);
-        } finally {
-            
         }
     }));
 
