@@ -302,19 +302,6 @@ const deleteFiles = () => {
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full text-center hover:bg-white hover:text-black transition-colors"
                 style={{ letterSpacing: "2px" }}
             >
-                Upload
-                <input
-                    id="file-upload"
-                    type="file"
-                    className="hidden"
-                    // @ts-ignore
-                    webkitdirectory="true"
-                    onChange={(e) => {
-                        // handle file upload here
-                        console.log(Array.from(e.target.files || []));
-                    }}
-                />
-            </label>
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
                 onClick={downloadFiles}
