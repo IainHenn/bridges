@@ -1,8 +1,10 @@
 "use client"
 import { useState, useEffect } from "react";
 import { useRouter } from 'next/navigation';
-import { decodeReply } from "next/dist/server/app-render/entry-base";
+// import { decodeReply } from "next/dist/server/app-render/entry-base";
 import Dropzone from 'react-dropzone'
+import JSZip from "jszip";
+
 
 
 export default function files() {
@@ -91,9 +93,11 @@ export default function files() {
     }
   }
 
-const downloadFiles = () => {
+const downloadFiles = async () => {
     console.log(selectedFiles);
-    fetch("http://localhost:8080/users/files", {
+    let zip = new JSZip();
+    let foldersToZip: Record<string, any[]> = {};
+    const resp = await fetch("http://localhost:8080/users/files", {
         method: "POST",
         credentials: "include",
         headers: {
@@ -102,94 +106,129 @@ const downloadFiles = () => {
         body: JSON.stringify({
             selectedFiles
         })
-    })
-        .then(resp => resp.json())
-        .then(data => {
-            console.log("data");
-            console.dir(data);
-            data.files.forEach(async (file: any) => {
-                console.log(`privateKeyEncDec: ${privateKeyEncDec}`);
-                const { EncryptedFile, Iv, EncryptedAesKey, FileType, FileName } = file;
-                console.log("encryptedfile:", EncryptedFile);
-                console.log("iv:", Iv);
-                console.log("encryptedAesKey:", EncryptedAesKey);
-                console.log("fileType:", FileType);
-                console.log("FileName:", FileName);
+    });
+    const data = await resp.json();
+    console.log("data");
+    console.dir(data);
+    await Promise.all(data.files.map(async (file: any) => {
+        console.log(`privateKeyEncDec: ${privateKeyEncDec}`);
+        const { EncryptedFile, Iv, EncryptedAesKey, FileType, FileName } = file;
+        console.log("encryptedfile:", EncryptedFile);
+        console.log("iv:", Iv);
+        console.log("encryptedAesKey:", EncryptedAesKey);
+        console.log("fileType:", FileType);
+        console.log("FileName:", FileName);
 
-                // Helper to convert base64 to ArrayBuffer
-                function base64ToArrayBuffer(base64: string): ArrayBuffer {
-                    const binaryString = window.atob(base64);
-                    const len = binaryString.length;
-                    const bytes = new Uint8Array(len);
-                    for (let i = 0; i < len; i++) {
-                        bytes[i] = binaryString.charCodeAt(i);
-                    }
-                    return bytes.buffer;
+        // Helper to convert base64 to ArrayBuffer
+        function base64ToArrayBuffer(base64: string): ArrayBuffer {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        // Get user's private RSA key from state (base64 PKCS8)
+        if (!privateKeyEncDec) {
+            alert("Please upload your private key first.");
+            return;
+        }
+
+        try {
+            // Import the private key
+            const privateKey = await window.crypto.subtle.importKey(
+                "pkcs8",
+                base64ToArrayBuffer(privateKeyEncDec),
+                {
+                    name: "RSA-OAEP",
+                    hash: "SHA-256"
+                },
+                false,
+                ["decrypt"]
+            );
+
+            // Decrypt AES key with RSA private key
+            const aesKeyRaw = await window.crypto.subtle.decrypt(
+                { name: "RSA-OAEP" },
+                privateKey,
+                base64ToArrayBuffer(EncryptedAesKey)
+            );
+
+            // Import decrypted AES key
+            const aesKey = await window.crypto.subtle.importKey(
+                "raw",
+                aesKeyRaw,
+                { name: "AES-GCM" },
+                false,
+                ["decrypt"]
+            );
+
+            // Decrypt file data with AES key
+            const decryptedContent = await window.crypto.subtle.decrypt(
+                {
+                    name: "AES-GCM",
+                    iv: base64ToArrayBuffer(Iv)
+                },
+                aesKey,
+                base64ToArrayBuffer(EncryptedFile)
+            );
+
+            // Then we know it's a file in a folder(s)
+            if(FileName.includes("/")){
+                // Take whatever is after the first "/"
+                const zipPath = FileName.substring(FileName.indexOf("/") + 1);
+                zip.file(zipPath, new Blob([decryptedContent], { type: FileType || "application/octet-stream" }));
+                if (Object.keys(foldersToZip).includes(FileName.split("/")[0])) {
+                    foldersToZip[FileName.split("/")[0]].push({"zipPath": zipPath, "decryptedContent": decryptedContent})
+                } else {
+                    foldersToZip[FileName.split("/")[0]] = []
+                    foldersToZip[FileName.split("/")[0]].push({"zipPath": zipPath, "decryptedContent": decryptedContent})
                 }
+            }
+            else {
+                const blob = new Blob([decryptedContent], { type: FileType || "application/octet-stream" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = FileName || "downloaded_file";
+                document.body.appendChild(a);
+                a.click();
+                
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+            }
+        } catch (error) {
+            alert("Failed to decrypt file. Make sure your private key is correct.");
+            console.error(error);
+        } finally {
+            
+        }
+    }));
 
-                // Get user's private RSA key from state (base64 PKCS8)
-                if (!privateKeyEncDec) {
-                    alert("Please upload your private key first.");
-                    return;
-                }
-
-                try {
-                    // Import the private key
-                    const privateKey = await window.crypto.subtle.importKey(
-                        "pkcs8",
-                        base64ToArrayBuffer(privateKeyEncDec),
-                        {
-                            name: "RSA-OAEP",
-                            hash: "SHA-256"
-                        },
-                        false,
-                        ["decrypt"]
-                    );
-
-                    // Decrypt AES key with RSA private key
-                    const aesKeyRaw = await window.crypto.subtle.decrypt(
-                        { name: "RSA-OAEP" },
-                        privateKey,
-                        base64ToArrayBuffer(EncryptedAesKey)
-                    );
-
-                    // Import decrypted AES key
-                    const aesKey = await window.crypto.subtle.importKey(
-                        "raw",
-                        aesKeyRaw,
-                        { name: "AES-GCM" },
-                        false,
-                        ["decrypt"]
-                    );
-
-                    // Decrypt file data with AES key
-                    const decryptedContent = await window.crypto.subtle.decrypt(
-                        {
-                            name: "AES-GCM",
-                            iv: base64ToArrayBuffer(Iv)
-                        },
-                        aesKey,
-                        base64ToArrayBuffer(EncryptedFile)
-                    );
-
-                    // Download the decrypted file
-                    const blob = new Blob([decryptedContent], { type: FileType || "application/octet-stream" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = FileName || "downloaded_file";
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(() => {
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                    }, 100);
-                } catch (error) {
-                    alert("Failed to decrypt file. Make sure your private key is correct.");
-                    console.error(error);
-                }
+    if (Object.keys(foldersToZip).length > 0) {
+        Object.entries(foldersToZip).forEach(([folderName, filesList]) => {
+            const folderZip = new JSZip();
+            filesList.forEach(({ zipPath, decryptedContent }) => {
+                folderZip.file(zipPath, new Blob([decryptedContent]));
+            });
+            folderZip.generateAsync({ type: "blob" }).then((content) => {
+                const url = URL.createObjectURL(content);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${folderName}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
             });
         });
+    }
 }
 
 const deleteFiles = () => {
