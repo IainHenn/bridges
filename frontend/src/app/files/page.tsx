@@ -18,6 +18,9 @@ export default function files() {
   const [selectAll, setSelectAll] = useState(false);
   const [publicKeyEncDec, setPublicKeyEncDec] = useState("");
   const [privateKeyEncDec, setPrivateKeyEncDec] = useState("");
+  const [privateKeyStatus, setPrivateKeyStatus] = useState<null | "valid" | "invalid">(null);
+  const [privateKeyStatusText, setPrivateKeyStatusText] = useState("");
+  const [privateKeyStatusAnimIdx, setPrivateKeyStatusAnimIdx] = useState(0);
   type FileMetadata = {
     fullPath: string;
     uploadDate: Date;
@@ -36,6 +39,57 @@ export default function files() {
     encryptedFile?: string;
     fileType?: string;
   };
+
+  // Animated typing effect for private key status
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    if (privateKeyStatus === "valid") {
+      const msg = "Private key is valid.";
+      if (privateKeyStatusAnimIdx < msg.length) {
+        timeout = setTimeout(() => {
+          setPrivateKeyStatusText(msg.slice(0, privateKeyStatusAnimIdx + 1));
+          setPrivateKeyStatusAnimIdx(privateKeyStatusAnimIdx + 1);
+        }, 40);
+      }
+    } else if (privateKeyStatus === "invalid") {
+      const msg = "Private key is not valid.";
+      if (privateKeyStatusAnimIdx < msg.length) {
+        timeout = setTimeout(() => {
+          setPrivateKeyStatusText(msg.slice(0, privateKeyStatusAnimIdx + 1));
+          setPrivateKeyStatusAnimIdx(privateKeyStatusAnimIdx + 1);
+        }, 40);
+      }
+    } else {
+      setPrivateKeyStatusText("");
+      setPrivateKeyStatusAnimIdx(0);
+    }
+    return () => clearTimeout(timeout);
+  }, [privateKeyStatus, privateKeyStatusAnimIdx]);
+
+  // Helper to check if a base64 string is a valid PKCS8 private key
+  async function isValidPrivateKey(base64: string): Promise<boolean> {
+    try {
+      const key = await window.crypto.subtle.importKey(
+        "pkcs8",
+        (() => {
+          const binaryString = window.atob(base64);
+          const len = binaryString.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) bytes[i] = binaryString.charCodeAt(i);
+          return bytes.buffer;
+        })(),
+        {
+          name: "RSA-OAEP",
+          hash: "SHA-256"
+        },
+        false,
+        ["decrypt"]
+      );
+      return !!key;
+    } catch {
+      return false;
+    }
+  }
 
 const downloadFiles = () => {
     console.log(selectedFiles);
@@ -316,12 +370,30 @@ const deleteFiles = () => {
                 maxFiles={1}
                 multiple={false}
                 onDrop={async (acceptedFiles) => {
-                    if (acceptedFiles.length === 1) {
-                        const file = acceptedFiles[0];
-                        const text = await file.text();
-                        const json = JSON.parse(text);
-                        console.log(json["privateKeyBase64"]);
-                        setPrivateKeyEncDec(json["privateKeyBase64"]);
+                    try {
+                        if (acceptedFiles.length === 1) {
+                            const file = acceptedFiles[0];
+                            const text = await file.text();
+                            const json = JSON.parse(text);
+                            const key = json["privateKeyBase64"];
+                            setPrivateKeyEncDec(key);
+                            setPrivateKeyStatus(null);
+                            setPrivateKeyStatusText("");
+                            setPrivateKeyStatusAnimIdx(0);
+                            if (key) {
+                            const valid = await isValidPrivateKey(key);
+                            setPrivateKeyStatus(valid ? "valid" : "invalid");
+                            setPrivateKeyStatusAnimIdx(0);
+                            } else {
+                                setPrivateKeyStatus("invalid");
+                                setPrivateKeyStatusAnimIdx(0);
+                            }
+                        }
+                    }
+
+                    catch {
+                        setPrivateKeyStatus("invalid");
+                        setPrivateKeyStatusAnimIdx(0);
                     }
                 }}
             >
@@ -341,6 +413,12 @@ const deleteFiles = () => {
                                 ? "Drop your privatekey.txt here..."
                                 : "Drag & drop your privatekey.txt here, or click to select"}
                         </span>
+                        {/* Animated private key status below */}
+                        {privateKeyStatus !== null && (
+                          <div className={`mt-4 text-lg font-mono transition-colors duration-200 ${privateKeyStatus === "valid" ? "text-green-400" : "text-red-400"}`}>
+                            {privateKeyStatusText}
+                          </div>
+                        )}
                     </div>
                 )}
             </Dropzone>
