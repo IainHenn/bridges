@@ -590,6 +590,7 @@ const deleteFiles = () => {
                                                     encryptedAesKey: encryptedAesKey,
                                                     encryptedFile: encryptedFile,
                                                     fileType: fileType,
+                                                    fileSize: file.size,
                                                 };
                                                 fileMetadatas.push(file_metadata);
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -569,6 +570,7 @@ func uploadUserData(c *gin.Context) {
 		EncryptedAesKey string `json:"encryptedAesKey"`
 		EncryptedFile   string `json:"encryptedFile"`
 		FileType        string `json:"fileType"`
+		FileSize        int    `json:"fileSize"`
 	}
 
 	var req struct {
@@ -721,6 +723,9 @@ func uploadUserData(c *gin.Context) {
 					"s3Path": {
 						S: aws.String(fmt.Sprintf("user_data/%s/%s", email, encPath)),
 					},
+					"fileSize": {
+						N: aws.String(fmt.Sprintf("%d", fileMetadatas[i].FileSize)),
+					},
 				},
 			}
 
@@ -840,6 +845,7 @@ func fetchUserFiles(c *gin.Context) {
 			FileType        string
 			Iv              string
 			EncryptedAesKey string
+			FileSize        int
 		}
 
 		var files []fileDTO
@@ -882,7 +888,7 @@ func fetchUserFiles(c *gin.Context) {
 				RequestItems: map[string]*dynamodb.KeysAndAttributes{
 					"file_metadata": {
 						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv"),
+						ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv, fileSize"),
 					},
 				},
 			}
@@ -901,8 +907,9 @@ func fetchUserFiles(c *gin.Context) {
 					s3PathAttr, ok2 := item["s3Path"]
 					fileTypeAttr, ok3 := item["FileType"]
 					ivAttr, ok4 := item["iv"]
-					encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
-					if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil {
+					fileSizeAttr, ok5 := item["fileSize"]
+					encryptedAesKeyAttr, ok6 := item["EncryptedAesKey"]
+					if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
 						input := &s3.GetObjectInput{
 							Bucket: aws.String(s3Bucket),
 							Key:    aws.String(*s3PathAttr.S),
@@ -924,12 +931,19 @@ func fetchUserFiles(c *gin.Context) {
 
 						strFile := string(data)
 
+						size, err := strconv.Atoi(*fileSizeAttr.N)
+						if err != nil {
+							c.Status(500)
+							return
+						}
+
 						fileObj := fileDTO{
 							FileName:        *fileNameAttr.S,
 							FileType:        *fileTypeAttr.S,
 							EncryptedFile:   strFile,
 							Iv:              *ivAttr.S,
 							EncryptedAesKey: *encryptedAesKeyAttr.S,
+							FileSize:        size,
 						}
 						files = append(files, fileObj)
 					}
@@ -951,7 +965,7 @@ func fetchUserFiles(c *gin.Context) {
 			RequestItems: map[string]*dynamodb.KeysAndAttributes{
 				"file_metadata": {
 					Keys:                 keys,
-					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey"),
+					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey, fileSize"),
 				},
 			},
 		}
@@ -970,6 +984,7 @@ func fetchUserFiles(c *gin.Context) {
 			FileType        string
 			Iv              string
 			EncryptedAesKey string
+			FileSize        int
 		}
 
 		var files []fileDTO
@@ -994,7 +1009,8 @@ func fetchUserFiles(c *gin.Context) {
 				fileTypeAttr, ok3 := item["FileType"]
 				ivAttr, ok4 := item["iv"]
 				encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
-				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil {
+				fileSizeAttr, ok6 := item["fileSize"]
+				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileNameAttr.N != nil {
 					input := &s3.GetObjectInput{
 						Bucket: aws.String(s3Bucket),
 						Key:    aws.String(*s3PathAttr.S),
@@ -1016,12 +1032,19 @@ func fetchUserFiles(c *gin.Context) {
 
 					strFile := string(data)
 
+					size, err := strconv.Atoi(*fileSizeAttr.N)
+					if err != nil {
+						c.Status(500)
+						return
+					}
+
 					fileObj := fileDTO{
 						FileName:        *fileNameAttr.S,
 						FileType:        *fileTypeAttr.S,
 						EncryptedFile:   strFile,
 						Iv:              *ivAttr.S,
 						EncryptedAesKey: *encryptedAesKeyAttr.S,
+						FileSize:        size,
 					}
 					files = append(files, fileObj)
 				}
