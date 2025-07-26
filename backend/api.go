@@ -805,11 +805,20 @@ func fetchUserFiles(c *gin.Context) {
 		return
 	}
 
-	type Files struct {
-		FileNameList []string `json:"selectedFiles"`
+	type fileDTO struct {
+		FileName        string
+		EncryptedFile   string
+		FileType        string
+		Iv              string
+		EncryptedAesKey string
+		FileSize        int
 	}
 
-	var filesReq Files
+	type file struct {
+		FileName string `json:"file"`
+	}
+
+	var filesReq file
 
 	err := c.BindJSON(&filesReq)
 
@@ -820,7 +829,7 @@ func fetchUserFiles(c *gin.Context) {
 		return
 	}
 
-	if len(filesReq.FileNameList) == 0 {
+	if filesReq.FileName == "" {
 		c.Status(400)
 		return
 	}
@@ -838,221 +847,103 @@ func fetchUserFiles(c *gin.Context) {
 		return
 	}
 
-	if len(filesReq.FileNameList) > 100 {
-		type fileDTO struct {
-			FileName        string
-			EncryptedFile   string
-			FileType        string
-			Iv              string
-			EncryptedAesKey string
-			FileSize        int
-		}
+	var keys []map[string]*dynamodb.AttributeValue
+	keys = append(keys, map[string]*dynamodb.AttributeValue{
+		"email":            {S: aws.String(emailStr)},
+		"originalFileName": {S: aws.String(filesReq.FileName)},
+	})
 
-		var files []fileDTO
-		remainder := len(filesReq.FileNameList) % 100
-		groups := (len(filesReq.FileNameList) / 100)
-
-		if remainder != 0 {
-			groups += 1
-		}
-
-		awsRegion := os.Getenv("AWS_REGION")
-		s3Bucket := os.Getenv("S3_BUCKET")
-		sess, err := session.NewSession(&aws.Config{
-			Region: aws.String(awsRegion),
-		})
-
-		if err != nil {
-			c.Status(500)
-			return
-		}
-
-		s3Client := s3.New(sess)
-
-		for i := 0; i < groups; i++ {
-			start := i * 100
-			end := start + 100
-
-			if end > len(filesReq.FileNameList) {
-				end = len(filesReq.FileNameList)
-			}
-			var keys []map[string]*dynamodb.AttributeValue
-			for _, fileName := range filesReq.FileNameList[start:end] {
-				keys = append(keys, map[string]*dynamodb.AttributeValue{
-					"email":            {S: aws.String(emailStr)},
-					"originalFileName": {S: aws.String(fileName)},
-				})
-			}
-
-			input := &dynamodb.BatchGetItemInput{
-				RequestItems: map[string]*dynamodb.KeysAndAttributes{
-					"file_metadata": {
-						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv, fileSize"),
-					},
-				},
-			}
-
-			result, err := db.BatchGetItem(input)
-			if err != nil {
-				fmt.Println("Error getting item from DynamoDB:", err)
-				c.Status(500)
-				return
-			}
-			fmt.Println(result)
-
-			for _, items := range result.Responses {
-				for _, item := range items {
-					fileNameAttr, ok1 := item["originalFileName"]
-					s3PathAttr, ok2 := item["s3Path"]
-					fileTypeAttr, ok3 := item["FileType"]
-					ivAttr, ok4 := item["iv"]
-					fileSizeAttr, ok5 := item["fileSize"]
-					encryptedAesKeyAttr, ok6 := item["EncryptedAesKey"]
-					if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
-						input := &s3.GetObjectInput{
-							Bucket: aws.String(s3Bucket),
-							Key:    aws.String(*s3PathAttr.S),
-						}
-
-						result, err := s3Client.GetObject(input)
-						if err != nil {
-							// handle error
-							log.Fatalf("Failed to get object: %v", err)
-						}
-						defer result.Body.Close()
-
-						// Read the object data
-						data, err := io.ReadAll(result.Body)
-						if err != nil {
-							// handle error
-							log.Fatalf("Failed to read object data: %v", err)
-						}
-
-						strFile := string(data)
-
-						size, err := strconv.Atoi(*fileSizeAttr.N)
-						if err != nil {
-							c.Status(500)
-							return
-						}
-
-						fileObj := fileDTO{
-							FileName:        *fileNameAttr.S,
-							FileType:        *fileTypeAttr.S,
-							EncryptedFile:   strFile,
-							Iv:              *ivAttr.S,
-							EncryptedAesKey: *encryptedAesKeyAttr.S,
-							FileSize:        size,
-						}
-						files = append(files, fileObj)
-					}
-				}
-			}
-		}
-
-		c.IndentedJSON(200, gin.H{"files": files})
-	} else {
-		var keys []map[string]*dynamodb.AttributeValue
-		for _, fileName := range filesReq.FileNameList {
-			keys = append(keys, map[string]*dynamodb.AttributeValue{
-				"email":            {S: aws.String(emailStr)},
-				"originalFileName": {S: aws.String(fileName)},
-			})
-		}
-
-		input := &dynamodb.BatchGetItemInput{
-			RequestItems: map[string]*dynamodb.KeysAndAttributes{
-				"file_metadata": {
-					Keys:                 keys,
-					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey, fileSize"),
-				},
+	input := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]*dynamodb.KeysAndAttributes{
+			"file_metadata": {
+				Keys:                 keys,
+				ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey, fileSize"),
 			},
+		},
+	}
+
+	result, err := db.BatchGetItem(input)
+	if err != nil {
+		fmt.Println("Error getting item from DynamoDB:", err)
+		c.Status(500)
+		return
+	}
+	fmt.Println(result)
+
+	awsRegion := os.Getenv("AWS_REGION")
+	s3Bucket := os.Getenv("S3_BUCKET")
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(awsRegion),
+	})
+
+	if err != nil {
+		fmt.Println("Failed to create AWS session:", err)
+		return
+	}
+
+	s3Client := s3.New(sess)
+
+	var found = false
+
+	var fileToReturn fileDTO
+
+	for _, items := range result.Responses {
+		if found {
+			break
 		}
-
-		result, err := db.BatchGetItem(input)
-		if err != nil {
-			fmt.Println("Error getting item from DynamoDB:", err)
-			c.Status(500)
-			return
-		}
-		fmt.Println(result)
-
-		type fileDTO struct {
-			FileName        string
-			EncryptedFile   string
-			FileType        string
-			Iv              string
-			EncryptedAesKey string
-			FileSize        int
-		}
-
-		var files []fileDTO
-
-		awsRegion := os.Getenv("AWS_REGION")
-		s3Bucket := os.Getenv("S3_BUCKET")
-		sess, err := session.NewSession(&aws.Config{
-			Region: aws.String(awsRegion),
-		})
-
-		if err != nil {
-			fmt.Println("Failed to create AWS session:", err)
-			return
-		}
-
-		s3Client := s3.New(sess)
-
-		for _, items := range result.Responses {
-			for _, item := range items {
-				fileNameAttr, ok1 := item["originalFileName"]
-				s3PathAttr, ok2 := item["s3Path"]
-				fileTypeAttr, ok3 := item["FileType"]
-				ivAttr, ok4 := item["iv"]
-				encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
-				fileSizeAttr, ok6 := item["fileSize"]
-				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileNameAttr.N != nil {
-					input := &s3.GetObjectInput{
-						Bucket: aws.String(s3Bucket),
-						Key:    aws.String(*s3PathAttr.S),
-					}
-
-					result, err := s3Client.GetObject(input)
-					if err != nil {
-						// handle error
-						log.Fatalf("Failed to get object: %v", err)
-					}
-					defer result.Body.Close()
-
-					// Read the object data
-					data, err := io.ReadAll(result.Body)
-					if err != nil {
-						// handle error
-						log.Fatalf("Failed to read object data: %v", err)
-					}
-
-					strFile := string(data)
-
-					size, err := strconv.Atoi(*fileSizeAttr.N)
-					if err != nil {
-						c.Status(500)
-						return
-					}
-
-					fileObj := fileDTO{
-						FileName:        *fileNameAttr.S,
-						FileType:        *fileTypeAttr.S,
-						EncryptedFile:   strFile,
-						Iv:              *ivAttr.S,
-						EncryptedAesKey: *encryptedAesKeyAttr.S,
-						FileSize:        size,
-					}
-					files = append(files, fileObj)
+		for _, item := range items {
+			fileNameAttr, ok1 := item["originalFileName"]
+			s3PathAttr, ok2 := item["s3Path"]
+			fileTypeAttr, ok3 := item["FileType"]
+			ivAttr, ok4 := item["iv"]
+			encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
+			fileSizeAttr, ok6 := item["fileSize"]
+			if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
+				input := &s3.GetObjectInput{
+					Bucket: aws.String(s3Bucket),
+					Key:    aws.String(*s3PathAttr.S),
 				}
+
+				result, err := s3Client.GetObject(input)
+				if err != nil {
+					// handle error
+					log.Fatalf("Failed to get object: %v", err)
+				}
+				defer result.Body.Close()
+
+				// Read the object data
+				data, err := io.ReadAll(result.Body)
+				if err != nil {
+					// handle error
+					log.Fatalf("Failed to read object data: %v", err)
+				}
+
+				strFile := string(data)
+
+				size, err := strconv.Atoi(*fileSizeAttr.N)
+				if err != nil {
+					c.Status(500)
+					return
+				}
+
+				fileObj := fileDTO{
+					FileName:        *fileNameAttr.S,
+					FileType:        *fileTypeAttr.S,
+					EncryptedFile:   strFile,
+					Iv:              *ivAttr.S,
+					EncryptedAesKey: *encryptedAesKeyAttr.S,
+					FileSize:        size,
+				}
+				fileToReturn = fileObj
+				found = true
+				break
 			}
 		}
-
-		c.IndentedJSON(200, gin.H{"files": files})
 	}
+	fmt.Println("before")
+	fmt.Println(fileToReturn)
+	fmt.Println("after")
+	c.IndentedJSON(200, gin.H{"file": fileToReturn})
 }
 
 func deleteUserFiles(c *gin.Context) {

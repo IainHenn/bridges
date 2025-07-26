@@ -97,22 +97,24 @@ const downloadFiles = async () => {
     console.log(selectedFiles);
     let zip = new JSZip();
     let foldersToZip: Record<string, any[]> = {};
-    const resp = await fetch("http://localhost:8080/users/files", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            selectedFiles
-        })
-    });
-    const data = await resp.json();
-    console.log("data");
-    console.dir(data);
-    await Promise.all(data.files.map(async (file: any) => {
+
+    for (const file of selectedFiles) {
+        console.log(file);
+        const resp = await fetch("http://localhost:8080/users/files", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file
+            })
+        });
+        const data = await resp.json();
+        console.log("data");
+        console.dir(data);
         console.log(`privateKeyEncDec: ${privateKeyEncDec}`);
-        const { EncryptedFile, Iv, EncryptedAesKey, FileType, FileName } = file;
+        const { EncryptedFile, Iv, EncryptedAesKey, FileType, FileName } = data.file;
         console.log("encryptedfile:", EncryptedFile);
         console.log("iv:", Iv);
         console.log("encryptedAesKey:", EncryptedAesKey);
@@ -204,7 +206,7 @@ const downloadFiles = async () => {
         } catch (error) {
             console.error(error);
         }
-    }));
+    }
 
     if (Object.keys(foldersToZip).length > 0) {
         Object.entries(foldersToZip).forEach(([folderName, filesList]) => {
