@@ -70,6 +70,19 @@ export default function files() {
     return () => clearTimeout(timeout);
   }, [privateKeyStatus, privateKeyStatusAnimIdx]);
 
+
+  function signOut() {
+    fetch("http://localhost:8080/users", {
+        method: "GET",
+        credentials: "include"
+    })
+    .then(resp => {
+        if(resp.ok){
+            router.push("/")
+        }
+    })
+  }
+
   // Helper to check if a base64 string is a valid PKCS8 private key
   async function isValidPrivateKey(base64: string): Promise<boolean> {
     try {
@@ -510,6 +523,14 @@ const deleteFiles = () => {
                     </div>
                 )}
             </Dropzone>
+
+            <button
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                onClick={signOut}
+                style={{ letterSpacing: "2px" }}
+            >
+            Sign Out
+            </button>
         </div>
         <div className="flex flex-col items-center justify-center bg-black border-2 border-white rounded-none shadow-none p-8 w-[80%] h-150 font-mono text-white">
             <div className="w-full h-full overflow-auto">

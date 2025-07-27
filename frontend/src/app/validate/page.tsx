@@ -8,12 +8,9 @@ import Dropzone from 'react-dropzone'
 export default function Validation() {
 
   const router = useRouter();
-  const [validated, setValidation] = useState(false);
   const [validationPhrase, setValidationPhrase] = useState("");
-  const [salt, setSalt] = useState("");
-  const [nonce, setNonce] = useState("");
-  const [encryptedKey, setEncryptedKey] = useState("");
   const [privateKey, setPrivateKey] = useState("");
+  const [fileText, setFileText] = useState("");
 
   function base64ToArrayBuffer(base64: string): ArrayBuffer {
     const binaryString = window.atob(base64);
@@ -139,12 +136,30 @@ export default function Validation() {
     });
   }, []);
 
+
   const handleDrop = async (acceptedFiles: File[]) => {
     const acceptedFile = acceptedFiles[0];
     let text = await acceptedFile.text();
-    const {salt, nonce, encryptedKey } = JSON.parse(text);
+    setFileText(text);
+  }
+
+  function signOut() {
+    fetch("http://localhost:8080/users", {
+      method: "GET",
+      credentials: "include"
+    })
+    .then(resp => {
+      if(resp.ok){
+        router.push("/");
+      }
+    })
+  }
+
+  async function submitInfo() {
+    const {salt, nonce, encryptedKey } = JSON.parse(fileText);
     const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
     setPrivateKey(returnedKey);
+
     const response = await fetch("/api/challenge", {
       method: "GET",
       headers: {
@@ -167,7 +182,7 @@ export default function Validation() {
         },
         await window.crypto.subtle.importKey(
           "pkcs8",
-          base64ToArrayBuffer(returnedKey),
+          base64ToArrayBuffer(privateKey),
           {
             name: "ECDSA",
             namedCurve: "P-256"
@@ -242,6 +257,20 @@ export default function Validation() {
           onChange={e => setValidationPhrase(e.target.value)}
           style={{ letterSpacing: "1px" }}
         />
+        <button
+            className="bg-black border-2 border-white text-white font-mono font-bold py-2 rounded-none transition-colors w-full mt-2 hover:bg-white hover:text-black"
+            style={{ letterSpacing: "2px" }}
+            onClick={submitInfo}
+          >
+        Validate Information
+        </button>
+        <button
+            className="bg-black border-2 border-white text-white font-mono font-bold py-2 rounded-none transition-colors w-full mt-2 hover:bg-white hover:text-black"
+            style={{ letterSpacing: "2px" }}
+            onClick={signOut}
+          >
+        Sign Out
+        </button>
       </div>
     </div>
   );

@@ -274,6 +274,38 @@ func signupUser(c *gin.Context) {
 	}
 }
 
+func signOutUser(c *gin.Context) {
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	db, err := getDBAccess()
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	_, err = db.Exec(`
+		DELETE FROM verification_tokens
+		WHERE user_id = (
+			SELECT id FROM users WHERE email = $1
+		)
+	`, email)
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	c.SetCookie("token", "", -1, "/", "", false, true)
+
+	c.Status(200)
+}
+
 func generateToken(c *gin.Context) {
 	type User struct {
 		Email    string `json:"email"`
@@ -1201,6 +1233,7 @@ func main() {
 	}))
 	router.POST("/sessions", loginUser)                                        // POST /sessions to create a session (login)
 	router.POST("/users", signupUser)                                          // POST /users to create a user (signup)
+	router.GET("/users", AuthMiddleware(), signOutUser)                        // GET /users to signout user, clearing cookie info + token from db (signout)
 	router.POST("/tokens", generateToken)                                      // POST /tokens to create a token
 	router.POST("/token-cookies", setTokenCookieHandler)                       // POST /token-cookies to set a token cookie
 	router.GET("/api/challenge", AuthMiddleware(), retrieveChallenge)          // POST /api/challenge to create a challenge for verifying user
