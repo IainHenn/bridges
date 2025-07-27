@@ -182,7 +182,7 @@ export default function Validation() {
         },
         await window.crypto.subtle.importKey(
           "pkcs8",
-          base64ToArrayBuffer(privateKey),
+          base64ToArrayBuffer(returnedKey),
           {
             name: "ECDSA",
             namedCurve: "P-256"
