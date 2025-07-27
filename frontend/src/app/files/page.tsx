@@ -25,6 +25,8 @@ export default function files() {
   const [privateKeyStatusAnimIdx, setPrivateKeyStatusAnimIdx] = useState(0);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [loading, setLoading] = useState(true); // loading state
+  const [loadingDots, setLoadingDots] = useState(0);
   type FileMetadata = {
     fullPath: string;
     uploadDate: Date;
@@ -351,6 +353,7 @@ const deleteFiles = () => {
         if(!resp.ok){
             router.push("/")
         } else {
+            setLoading(false); // authorized, stop loading
             return resp.json();
         }
     })
@@ -451,7 +454,18 @@ const deleteFiles = () => {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-black">
-        <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
+      {loading ? (
+        <div className="flex flex-col items-center justify-center w-full h-full">
+          <span
+            className="text-green-400 font-mono text-2xl"
+            style={{ letterSpacing: "2px" }}
+          >
+            Authorizing{" " + ".".repeat(loadingDots).padEnd(3, " ")}
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
                 onClick={downloadFiles}
@@ -531,8 +545,8 @@ const deleteFiles = () => {
             >
             Sign Out
             </button>
-        </div>
-        <div className="flex flex-col items-center justify-center bg-black border-2 border-white rounded-none shadow-none p-8 w-[80%] h-150 font-mono text-white">
+          </div>
+          <div className="flex flex-col items-center justify-center bg-black border-2 border-white rounded-none shadow-none p-8 w-[80%] h-150 font-mono text-white">
             <div className="w-full h-full overflow-auto">
                 <Dropzone noClick>
                     {({
@@ -806,6 +820,8 @@ const deleteFiles = () => {
                 )}
             </div>
         </div>
+        </>
+      )}
     </div>
   );
 }
