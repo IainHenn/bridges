@@ -95,31 +95,74 @@ export default function files() {
 
 const downloadFiles = async () => {
     console.log(selectedFiles);
+
+    // Fetch file metadata for selected files
+    const metadataResp = await fetch("http://localhost:8080/users/files/metadata", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ selectedFiles })
+    });
+
+    const metadataData = await metadataResp.json();
+    if (!metadataData || !Array.isArray(metadataData.files)) {
+        alert("Failed to fetch file metadata.");
+        return;
+    }
+
     let zip = new JSZip();
     let foldersToZip: Record<string, any[]> = {};
 
-    for (const file of selectedFiles) {
-        console.log(file);
+    for (const fileMeta of metadataData.files) {
+        const s3Path = fileMeta.S3Path || fileMeta.FileName;
+        const fileName = fileMeta.FileName;
+        const fileType = fileMeta.FileType;
+
+        // Stream file bytes from backend using s3Path
         const resp = await fetch("http://localhost:8080/users/files", {
             method: "POST",
             credentials: "include",
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                file
-            })
+            body: JSON.stringify({ s3Path })
         });
-        const data = await resp.json();
-        console.log("data");
-        console.dir(data);
-        console.log(`privateKeyEncDec: ${privateKeyEncDec}`);
-        const { EncryptedFile, Iv, EncryptedAesKey, FileType, FileName } = data.file;
-        console.log("encryptedfile:", EncryptedFile);
-        console.log("iv:", Iv);
-        console.log("encryptedAesKey:", EncryptedAesKey);
-        console.log("fileType:", FileType);
-        console.log("FileName:", FileName);
+
+        if (!resp.ok) {
+            console.error(`Failed to fetch file: ${fileName}`);
+            continue;
+        }
+
+        const contentLength = Number(resp.headers.get("Content-Length")) || 0;
+        const reader = resp.body?.getReader();
+        let receivedLength = 0;
+        const chunks: Uint8Array[] = [];
+
+        while (reader) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            receivedLength += value.length;
+            console.log(receivedLength);
+        }
+
+        // Concatenate chunks
+        const encryptedFileBuffer = new Uint8Array(receivedLength);
+        let position = 0;
+        for (const chunk of chunks) {
+        encryptedFileBuffer.set(chunk, position);
+        position += chunk.length;
+        }
+
+        console.log(encryptedFileBuffer);
+
+        // Get user's private RSA key from state (base64 PKCS8)
+        if (!privateKeyEncDec) {
+            alert("Please upload your private key first.");
+            return;
+        }
 
         // Helper to convert base64 to ArrayBuffer
         function base64ToArrayBuffer(base64: string): ArrayBuffer {
@@ -130,12 +173,6 @@ const downloadFiles = async () => {
                 bytes[i] = binaryString.charCodeAt(i);
             }
             return bytes.buffer;
-        }
-
-        // Get user's private RSA key from state (base64 PKCS8)
-        if (!privateKeyEncDec) {
-            alert("Please upload your private key first.");
-            return;
         }
 
         try {
@@ -155,7 +192,7 @@ const downloadFiles = async () => {
             const aesKeyRaw = await window.crypto.subtle.decrypt(
                 { name: "RSA-OAEP" },
                 privateKey,
-                base64ToArrayBuffer(EncryptedAesKey)
+                base64ToArrayBuffer(fileMeta.EncryptedAesKey)
             );
 
             // Import decrypted AES key
@@ -167,37 +204,39 @@ const downloadFiles = async () => {
                 ["decrypt"]
             );
 
+            console.log("A");
+
             // Decrypt file data with AES key
             const decryptedContent = await window.crypto.subtle.decrypt(
                 {
                     name: "AES-GCM",
-                    iv: base64ToArrayBuffer(Iv)
+                    iv: base64ToArrayBuffer(fileMeta.Iv)
                 },
                 aesKey,
-                base64ToArrayBuffer(EncryptedFile)
+                encryptedFileBuffer
             );
 
-            // Then we know it's a file in a folder(s)
-            if(FileName.includes("/")){
-                // Take whatever is after the first "/"
-                const zipPath = FileName.substring(FileName.indexOf("/") + 1);
-                zip.file(zipPath, new Blob([decryptedContent], { type: FileType || "application/octet-stream" }));
-                if (Object.keys(foldersToZip).includes(FileName.split("/")[0])) {
-                    foldersToZip[FileName.split("/")[0]].push({"zipPath": zipPath, "decryptedContent": decryptedContent})
+            console.log("B");
+
+            // If file is in a folder, add to zip
+            if (fileName.includes("/")) {
+                const zipPath = fileName.substring(fileName.indexOf("/") + 1);
+                zip.file(zipPath, new Blob([decryptedContent], { type: fileType || "application/octet-stream" }));
+                if (Object.keys(foldersToZip).includes(fileName.split("/")[0])) {
+                    foldersToZip[fileName.split("/")[0]].push({ zipPath, decryptedContent });
                 } else {
-                    foldersToZip[FileName.split("/")[0]] = []
-                    foldersToZip[FileName.split("/")[0]].push({"zipPath": zipPath, "decryptedContent": decryptedContent})
+                    foldersToZip[fileName.split("/")[0]] = [{ zipPath, decryptedContent }];
                 }
-            }
-            else {
-                const blob = new Blob([decryptedContent], { type: FileType || "application/octet-stream" });
+            } else {
+                // Download single file directly
+                const blob = new Blob([decryptedContent], { type: fileType || "application/octet-stream" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = FileName || "downloaded_file";
+                a.download = fileName || "downloaded_file";
                 document.body.appendChild(a);
                 a.click();
-                
+
                 setTimeout(() => {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
@@ -208,6 +247,7 @@ const downloadFiles = async () => {
         }
     }
 
+    // Download folders as zip
     if (Object.keys(foldersToZip).length > 0) {
         Object.entries(foldersToZip).forEach(([folderName, filesList]) => {
             const folderZip = new JSZip();
@@ -228,7 +268,7 @@ const downloadFiles = async () => {
             });
         });
     }
-}
+};
 
 const deleteFiles = () => {
     fetch("http://localhost:8080/users/files", {
