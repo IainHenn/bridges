@@ -23,6 +23,8 @@ export default function files() {
   const [privateKeyStatus, setPrivateKeyStatus] = useState<null | "valid" | "invalid">(null);
   const [privateKeyStatusText, setPrivateKeyStatusText] = useState("");
   const [privateKeyStatusAnimIdx, setPrivateKeyStatusAnimIdx] = useState(0);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
   type FileMetadata = {
     fullPath: string;
     uploadDate: Date;
@@ -94,6 +96,8 @@ export default function files() {
   }
 
 const downloadFiles = async () => {
+    setIsDownloading(true);
+    setDownloadProgress(0);
     console.log(selectedFiles);
 
     // Fetch file metadata for selected files
@@ -114,6 +118,9 @@ const downloadFiles = async () => {
 
     let zip = new JSZip();
     let foldersToZip: Record<string, any[]> = {};
+
+    let totalFiles = metadataData.files.length;
+    let currentFileIdx = 0;
 
     for (const fileMeta of metadataData.files) {
         const s3Path = fileMeta.S3Path || fileMeta.FileName;
@@ -145,7 +152,17 @@ const downloadFiles = async () => {
             if (done) break;
             chunks.push(value);
             receivedLength += value.length;
-            console.log(receivedLength);
+            // Progress for current file (if contentLength known)
+            if (contentLength > 0) {
+                setDownloadProgress(
+                    Math.min(
+                        100,
+                        Math.round(
+                            ((currentFileIdx + receivedLength / contentLength) / totalFiles) * 100
+                        )
+                    )
+                );
+            }
         }
 
         // Concatenate chunks
@@ -160,6 +177,7 @@ const downloadFiles = async () => {
 
         // Get user's private RSA key from state (base64 PKCS8)
         if (!privateKeyEncDec) {
+            setIsDownloading(false);
             alert("Please upload your private key first.");
             return;
         }
@@ -245,6 +263,9 @@ const downloadFiles = async () => {
         } catch (error) {
             console.error(error);
         }
+        currentFileIdx++;
+        // Progress for completed file
+        setDownloadProgress(Math.round((currentFileIdx / totalFiles) * 100));
     }
 
     // Download folders as zip
@@ -271,6 +292,7 @@ const downloadFiles = async () => {
 };
 
 const deleteFiles = () => {
+    setIsDownloading(false);
     fetch("http://localhost:8080/users/files", {
         method: "DELETE",
         credentials: "include",
@@ -760,6 +782,19 @@ const deleteFiles = () => {
                         </div>
                     )}
                 </Dropzone>
+            </div>
+            <div className="w-full mt-4">
+                {isDownloading && (
+                <div className="w-full bg-gray-700 rounded h-6 relative">
+                    <div
+                    className="bg-green-400 h-6 rounded transition-all duration-100"
+                    style={{ width: `${downloadProgress}%`}}
+                    ></div>
+                    <span className="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 text-black font-bold font-mono text-sm">
+                    {downloadProgress}%
+                    </span>
+                </div>
+                )}
             </div>
         </div>
     </div>
