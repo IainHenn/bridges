@@ -26,7 +26,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-      <link rel="icon" href="/bridges.svg" type="image/svg+xml"></link>
+      <link rel="icon" href="/bridges4.svg" type="image/svg+xml"></link>
         {children}
       </body>
     </html>
