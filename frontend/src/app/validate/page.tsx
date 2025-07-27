@@ -8,12 +8,11 @@ import Dropzone from 'react-dropzone'
 export default function Validation() {
 
   const router = useRouter();
-  const [validated, setValidation] = useState(false);
   const [validationPhrase, setValidationPhrase] = useState("");
-  const [salt, setSalt] = useState("");
-  const [nonce, setNonce] = useState("");
-  const [encryptedKey, setEncryptedKey] = useState("");
   const [privateKey, setPrivateKey] = useState("");
+  const [fileText, setFileText] = useState("");
+  const [loading, setLoading] = useState(true); // loading state
+  const [loadingDots, setLoadingDots] = useState(0);
 
   function base64ToArrayBuffer(base64: string): ArrayBuffer {
     const binaryString = window.atob(base64);
@@ -135,16 +134,45 @@ export default function Validation() {
     .then(resp => {
       if(!resp.ok){
         router.push("/");
+      } else {
+        setLoading(false); // authorized, stop loading
       }
     });
   }, []);
 
+  useEffect(() => {
+    if (loading) {
+      const interval = setInterval(() => {
+        setLoadingDots(d => (d + 1) % 4);
+      }, 400);
+      return () => clearInterval(interval);
+    }
+  }, [loading]);
+
+
   const handleDrop = async (acceptedFiles: File[]) => {
     const acceptedFile = acceptedFiles[0];
     let text = await acceptedFile.text();
-    const {salt, nonce, encryptedKey } = JSON.parse(text);
+    setFileText(text);
+  }
+
+  function signOut() {
+    fetch("http://localhost:8080/users", {
+      method: "GET",
+      credentials: "include"
+    })
+    .then(resp => {
+      if(resp.ok){
+        router.push("/");
+      }
+    })
+  }
+
+  async function submitInfo() {
+    const {salt, nonce, encryptedKey } = JSON.parse(fileText);
     const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
     setPrivateKey(returnedKey);
+
     const response = await fetch("/api/challenge", {
       method: "GET",
       headers: {
@@ -203,46 +231,71 @@ export default function Validation() {
   
   return (
     <div className="flex items-center justify-center min-h-screen bg-black">
-      <div className="flex flex-col items-center justify-center bg-black border-2 border-white rounded-none shadow-none p-8 w-[40%] min-w-[350px] font-mono text-white">
-        <Dropzone accept={{ "text/plain": [".txt"] }} onDrop={handleDrop} multiple={false}>
-          {({ getRootProps, getInputProps, isDragActive }) => (
-            <section>
-              <div
-                {...getRootProps()}
-                className={`flex flex-col items-center justify-center border-2 border-dashed rounded-none p-8 w-full transition-colors duration-200 font-mono ${
-                  isDragActive
-                    ? "bg-white border-black text-black"
-                    : "bg-black border-white text-white"
-                } cursor-pointer mb-6`}
-                style={{ letterSpacing: "1px" }}
-              >
-                <input {...getInputProps()} />
-                <p className="text-lg font-mono">
-                  {isDragActive
-                    ? "Drop your privateKey.txt here..."
-                    : (
-                      <>
-                        Drag & drop your privateKey.txt here<br />or click to select
-                      </>
-                    )}
-                </p>
-                <p className="text-sm mt-2 font-mono">
-                  Supported format: txt
-                </p>
-              </div>
-            </section>
-          )}
-        </Dropzone>
-        <input
-          id="validationPhrase"
-          type="password"
-          className="bg-black border-2 border-white text-white font-mono px-4 py-2 mt-2 rounded-none placeholder-gray-400 focus:outline-none focus:border-white focus:bg-black transition-colors w-full"
-          placeholder="Enter your validation phrase"
-          value={validationPhrase}
-          onChange={e => setValidationPhrase(e.target.value)}
-          style={{ letterSpacing: "1px" }}
-        />
-      </div>
+      {loading ? (
+        <div className="flex flex-col items-center justify-center w-full h-full">
+          <span
+            className="text-green-400 font-mono text-2xl"
+            style={{ letterSpacing: "2px" }}
+          >
+            Authorizing{" " + ".".repeat(loadingDots).padEnd(3, " ")}
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center bg-black border-2 border-white rounded-none shadow-none p-8 w-[40%] min-w-[350px] font-mono text-white">
+          <Dropzone accept={{ "text/plain": [".txt"] }} onDrop={handleDrop} multiple={false}>
+            {({ getRootProps, getInputProps, isDragActive }) => (
+              <section>
+                <div
+                  {...getRootProps()}
+                  className={`flex flex-col items-center justify-center border-2 border-dashed rounded-none p-8 w-full transition-colors duration-200 font-mono ${
+                    isDragActive
+                      ? "bg-white border-black text-black"
+                      : "bg-black border-white text-white"
+                  } cursor-pointer mb-6`}
+                  style={{ letterSpacing: "1px" }}
+                >
+                  <input {...getInputProps()} />
+                  <p className="text-lg font-mono">
+                    {isDragActive
+                      ? "Drop your privateKey.txt here..."
+                      : (
+                        <>
+                          Drag & drop your privateKey.txt here<br />or click to select
+                        </>
+                      )}
+                  </p>
+                  <p className="text-sm mt-2 font-mono">
+                    Supported format: txt
+                  </p>
+                </div>
+              </section>
+            )}
+          </Dropzone>
+          <input
+            id="validationPhrase"
+            type="password"
+            className="bg-black border-2 border-white text-white font-mono px-4 py-2 mt-2 rounded-none placeholder-gray-400 focus:outline-none focus:border-white focus:bg-black transition-colors w-full"
+            placeholder="Enter your validation phrase"
+            value={validationPhrase}
+            onChange={e => setValidationPhrase(e.target.value)}
+            style={{ letterSpacing: "1px" }}
+          />
+          <button
+              className="bg-black border-2 border-white text-white font-mono font-bold py-2 rounded-none transition-colors w-full mt-2 hover:bg-white hover:text-black"
+              style={{ letterSpacing: "2px" }}
+              onClick={submitInfo}
+            >
+          Validate Information
+          </button>
+          <button
+              className="bg-black border-2 border-white text-white font-mono font-bold py-2 rounded-none transition-colors w-full mt-2 hover:bg-white hover:text-black"
+              style={{ letterSpacing: "2px" }}
+              onClick={signOut}
+            >
+          Sign Out
+          </button>
+        </div>
+      )}
     </div>
   );
 }

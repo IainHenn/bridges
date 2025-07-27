@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"database/sql"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -15,8 +15,6 @@ import (
 	_ "github.com/lib/pq"
 
 	"crypto"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
@@ -28,7 +26,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -52,35 +49,6 @@ func initDynamoDB() (*dynamodb.DynamoDB, error) {
 	}
 
 	return dynamodb.New(sess), err
-}
-
-func encryptPrivateKey(pemBytes []byte, password string) ([]byte, error) {
-	// Derive key from password using PBKDF2
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
-	}
-	key := pbkdf2.Key([]byte(password), salt, 100_000, 32, sha256.New)
-
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-
-	aesGCM, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-
-	nonce := make([]byte, 12)
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
-	}
-
-	ciphertext := aesGCM.Seal(nonce, nonce, pemBytes, nil)
-
-	// Prepend salt so you can derive key during decryption
-	return append(salt, ciphertext...), nil
 }
 
 func getDBAccess() (*sql.DB, error) {
@@ -113,20 +81,9 @@ func getStartingId(db *sql.DB, tableName string) int {
 	return id
 }
 
-func decodeHexString(s string) ([]byte, error) {
-	b := make([]byte, len(s)/2)
-	_, err := fmt.Sscanf(s, "%x", &b)
-	return b, err
-}
-
 // Middleware
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-
-		for _, cookie := range c.Request.Cookies() {
-			fmt.Printf("🍪 Cookie received: %s = %s\n", cookie.Name, cookie.Value)
-		}
-
 		verificationToken, err := c.Cookie("token")
 
 		if err != nil {
@@ -138,7 +95,6 @@ func AuthMiddleware() gin.HandlerFunc {
 		db, err := getDBAccess()
 
 		if err != nil {
-			fmt.Println("cant get db acccess")
 			c.Status(500)
 			c.Abort()
 			return
@@ -166,7 +122,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		} else if err != nil {
-			fmt.Println("some weird error,", err)
 			c.Status(500)
 			c.Abort()
 			return
@@ -244,7 +199,6 @@ func signupUser(c *gin.Context) {
 		PublicKeyEncDec string `json:"publicKeyEncDec"`
 	}
 
-	fmt.Println("hihihi")
 	var userReq User
 
 	err := c.BindJSON(&userReq)
@@ -256,14 +210,12 @@ func signupUser(c *gin.Context) {
 	db, err := getDBAccess()
 
 	if err != nil {
-		fmt.Println("in here")
 		c.Status(500) // Server issue on db
 		return
 	}
 
 	hashedPasswordBytes, err := bcrypt.GenerateFromPassword([]byte(userReq.Password), 10)
 	if err != nil {
-		fmt.Println("over here")
 		c.Status(500)
 	}
 	hashedPassword := string(hashedPasswordBytes)
@@ -283,7 +235,6 @@ func signupUser(c *gin.Context) {
 			pub_key_enc_dec)  
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`, userReq.Email, hashedPassword, userReq.PublicKey, userReq.EncryptedKey, userReq.Salt, userReq.Nonce, userReq.PublicKeyEncDec)
 		if err != nil {
-			fmt.Println(err)
 			c.Status(500)
 			return
 		}
@@ -296,7 +247,7 @@ func signupUser(c *gin.Context) {
 		})
 
 		if err != nil {
-			fmt.Println("Failed to create AWS session:", err)
+			c.Status(500)
 			return
 		}
 
@@ -308,7 +259,6 @@ func signupUser(c *gin.Context) {
 		})
 
 		if err != nil {
-			fmt.Println("Failed to create S3 folder:", err)
 			c.Status(500)
 			return
 		}
@@ -316,13 +266,44 @@ func signupUser(c *gin.Context) {
 		c.Status(201)
 		return
 	} else if err != nil {
-		fmt.Println("way over here")
 		c.Status(500)
 		return
 	} else {
 		c.Status(422) //Entity already exists, entity error
 		return
 	}
+}
+
+func signOutUser(c *gin.Context) {
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	db, err := getDBAccess()
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	_, err = db.Exec(`
+		DELETE FROM verification_tokens
+		WHERE user_id = (
+			SELECT id FROM users WHERE email = $1
+		)
+	`, email)
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	c.SetCookie("token", "", -1, "/", "", false, true)
+
+	c.Status(200)
 }
 
 func generateToken(c *gin.Context) {
@@ -559,7 +540,6 @@ func authorizeUser(c *gin.Context) {
 }
 
 func uploadUserData(c *gin.Context) {
-	fmt.Println("we inside upload")
 
 	// Define a struct for file metadata
 	type FileMetadata struct {
@@ -569,6 +549,7 @@ func uploadUserData(c *gin.Context) {
 		EncryptedAesKey string `json:"encryptedAesKey"`
 		EncryptedFile   string `json:"encryptedFile"`
 		FileType        string `json:"fileType"`
+		FileSize        int    `json:"fileSize"`
 	}
 
 	var req struct {
@@ -581,8 +562,6 @@ func uploadUserData(c *gin.Context) {
 	}
 
 	fileMetadatas := req.FileMetadata
-
-	fmt.Println("fileMetadatas", fileMetadatas)
 
 	emailVal, exists := c.Get("email")
 	if !exists {
@@ -598,7 +577,6 @@ func uploadUserData(c *gin.Context) {
 
 	db, err := initDynamoDB()
 	if err != nil {
-		fmt.Println("Failed to initialize DynamoDB:", err)
 		c.Status(500)
 		return
 	}
@@ -632,7 +610,6 @@ func uploadUserData(c *gin.Context) {
 
 		result, err := db.GetItem(input)
 		if err != nil {
-			fmt.Println("Error getting item from DynamoDB:", err)
 			c.Status(500)
 			return
 		}
@@ -721,6 +698,9 @@ func uploadUserData(c *gin.Context) {
 					"s3Path": {
 						S: aws.String(fmt.Sprintf("user_data/%s/%s", email, encPath)),
 					},
+					"fileSize": {
+						N: aws.String(fmt.Sprintf("%d", fileMetadatas[i].FileSize)),
+					},
 				},
 			}
 
@@ -746,6 +726,7 @@ func obtainUserFileNames(c *gin.Context) {
 
 	if err != nil {
 		c.Status(500)
+		return
 	}
 
 	emailStr, ok := email.(string)
@@ -765,11 +746,9 @@ func obtainUserFileNames(c *gin.Context) {
 
 	result, err := db.Query(input)
 	if err != nil {
-		fmt.Println("Error getting item from DynamoDB:", err)
 		c.Status(500)
 		return
 	}
-	fmt.Println(result)
 
 	type fileDTO struct {
 		FileName     string
@@ -793,7 +772,71 @@ func obtainUserFileNames(c *gin.Context) {
 	c.IndentedJSON(200, gin.H{"files": files})
 }
 
-func fetchUserFiles(c *gin.Context) {
+func fetchUserFile(c *gin.Context) {
+	_, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	var req struct {
+		S3Path string `json:"s3Path"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.Status(400)
+		return
+	}
+	if req.S3Path == "" {
+		c.Status(400)
+		return
+	}
+
+	awsRegion := os.Getenv("AWS_REGION")
+	s3Bucket := os.Getenv("S3_BUCKET")
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(awsRegion),
+	})
+	if err != nil {
+		c.Status(500)
+		return
+	}
+	s3Client := s3.New(sess)
+
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(s3Bucket),
+		Key:    aws.String(req.S3Path),
+	}
+
+	result, err := s3Client.GetObject(input)
+	if err != nil {
+		c.Status(404)
+		return
+	}
+	defer result.Body.Close()
+
+	buf := new(bytes.Buffer)
+	_, err = io.Copy(buf, result.Body)
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(buf.String())
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	contentType := "application/octet-stream"
+	if result.ContentType != nil && *result.ContentType != "" {
+		contentType = *result.ContentType
+	}
+	c.Header("Content-Type", contentType)
+	c.Status(200)
+	c.Writer.Write(decoded)
+}
+
+func fetchFileMetadatas(c *gin.Context) {
 	email, exists := c.Get("email")
 	if !exists {
 		c.Status(401)
@@ -807,8 +850,6 @@ func fetchUserFiles(c *gin.Context) {
 	var filesReq Files
 
 	err := c.BindJSON(&filesReq)
-
-	fmt.Println(filesReq)
 
 	if err != nil {
 		c.Status(400)
@@ -836,10 +877,11 @@ func fetchUserFiles(c *gin.Context) {
 	if len(filesReq.FileNameList) > 100 {
 		type fileDTO struct {
 			FileName        string
-			EncryptedFile   string
 			FileType        string
 			Iv              string
 			EncryptedAesKey string
+			S3Path          string
+			FileSize        int
 		}
 
 		var files []fileDTO
@@ -849,19 +891,6 @@ func fetchUserFiles(c *gin.Context) {
 		if remainder != 0 {
 			groups += 1
 		}
-
-		awsRegion := os.Getenv("AWS_REGION")
-		s3Bucket := os.Getenv("S3_BUCKET")
-		sess, err := session.NewSession(&aws.Config{
-			Region: aws.String(awsRegion),
-		})
-
-		if err != nil {
-			c.Status(500)
-			return
-		}
-
-		s3Client := s3.New(sess)
 
 		for i := 0; i < groups; i++ {
 			start := i * 100
@@ -882,18 +911,16 @@ func fetchUserFiles(c *gin.Context) {
 				RequestItems: map[string]*dynamodb.KeysAndAttributes{
 					"file_metadata": {
 						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv"),
+						ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv, fileSize"),
 					},
 				},
 			}
 
 			result, err := db.BatchGetItem(input)
 			if err != nil {
-				fmt.Println("Error getting item from DynamoDB:", err)
 				c.Status(500)
 				return
 			}
-			fmt.Println(result)
 
 			for _, items := range result.Responses {
 				for _, item := range items {
@@ -901,35 +928,23 @@ func fetchUserFiles(c *gin.Context) {
 					s3PathAttr, ok2 := item["s3Path"]
 					fileTypeAttr, ok3 := item["FileType"]
 					ivAttr, ok4 := item["iv"]
-					encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
-					if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil {
-						input := &s3.GetObjectInput{
-							Bucket: aws.String(s3Bucket),
-							Key:    aws.String(*s3PathAttr.S),
-						}
+					fileSizeAttr, ok5 := item["fileSize"]
+					encryptedAesKeyAttr, ok6 := item["EncryptedAesKey"]
+					if ok1 && fileNameAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil && ok2 && s3PathAttr.S != nil {
 
-						result, err := s3Client.GetObject(input)
+						size, err := strconv.Atoi(*fileSizeAttr.N)
 						if err != nil {
-							// handle error
-							log.Fatalf("Failed to get object: %v", err)
+							c.Status(500)
+							return
 						}
-						defer result.Body.Close()
-
-						// Read the object data
-						data, err := io.ReadAll(result.Body)
-						if err != nil {
-							// handle error
-							log.Fatalf("Failed to read object data: %v", err)
-						}
-
-						strFile := string(data)
 
 						fileObj := fileDTO{
 							FileName:        *fileNameAttr.S,
 							FileType:        *fileTypeAttr.S,
-							EncryptedFile:   strFile,
 							Iv:              *ivAttr.S,
+							S3Path:          *s3PathAttr.S,
 							EncryptedAesKey: *encryptedAesKeyAttr.S,
+							FileSize:        size,
 						}
 						files = append(files, fileObj)
 					}
@@ -951,41 +966,27 @@ func fetchUserFiles(c *gin.Context) {
 			RequestItems: map[string]*dynamodb.KeysAndAttributes{
 				"file_metadata": {
 					Keys:                 keys,
-					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey"),
+					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey, fileSize"),
 				},
 			},
 		}
 
 		result, err := db.BatchGetItem(input)
 		if err != nil {
-			fmt.Println("Error getting item from DynamoDB:", err)
 			c.Status(500)
 			return
 		}
-		fmt.Println(result)
 
 		type fileDTO struct {
 			FileName        string
-			EncryptedFile   string
 			FileType        string
 			Iv              string
 			EncryptedAesKey string
+			S3Path          string
+			FileSize        int
 		}
 
 		var files []fileDTO
-
-		awsRegion := os.Getenv("AWS_REGION")
-		s3Bucket := os.Getenv("S3_BUCKET")
-		sess, err := session.NewSession(&aws.Config{
-			Region: aws.String(awsRegion),
-		})
-
-		if err != nil {
-			fmt.Println("Failed to create AWS session:", err)
-			return
-		}
-
-		s3Client := s3.New(sess)
 
 		for _, items := range result.Responses {
 			for _, item := range items {
@@ -994,40 +995,26 @@ func fetchUserFiles(c *gin.Context) {
 				fileTypeAttr, ok3 := item["FileType"]
 				ivAttr, ok4 := item["iv"]
 				encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
-				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil {
-					input := &s3.GetObjectInput{
-						Bucket: aws.String(s3Bucket),
-						Key:    aws.String(*s3PathAttr.S),
-					}
-
-					result, err := s3Client.GetObject(input)
+				fileSizeAttr, ok6 := item["fileSize"]
+				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
+					size, err := strconv.Atoi(*fileSizeAttr.N)
 					if err != nil {
-						// handle error
-						log.Fatalf("Failed to get object: %v", err)
+						c.Status(500)
+						return
 					}
-					defer result.Body.Close()
-
-					// Read the object data
-					data, err := io.ReadAll(result.Body)
-					if err != nil {
-						// handle error
-						log.Fatalf("Failed to read object data: %v", err)
-					}
-
-					strFile := string(data)
 
 					fileObj := fileDTO{
 						FileName:        *fileNameAttr.S,
 						FileType:        *fileTypeAttr.S,
-						EncryptedFile:   strFile,
 						Iv:              *ivAttr.S,
+						S3Path:          *s3PathAttr.S,
 						EncryptedAesKey: *encryptedAesKeyAttr.S,
+						FileSize:        size,
 					}
 					files = append(files, fileObj)
 				}
 			}
 		}
-
 		c.IndentedJSON(200, gin.H{"files": files})
 	}
 }
@@ -1046,8 +1033,6 @@ func deleteUserFiles(c *gin.Context) {
 	var filesReq Files
 
 	err := c.BindJSON(&filesReq)
-
-	fmt.Println(filesReq)
 
 	if err != nil {
 		c.Status(400)
@@ -1121,7 +1106,6 @@ func deleteUserFiles(c *gin.Context) {
 
 			result, err := db.BatchGetItem(input)
 			if err != nil {
-				fmt.Println("Error getting item from DynamoDB:", err)
 				c.Status(500)
 				return
 			}
@@ -1189,7 +1173,6 @@ func deleteUserFiles(c *gin.Context) {
 
 		result, err := db.BatchGetItem(input)
 		if err != nil {
-			fmt.Println("Error getting item from DynamoDB:", err)
 			c.Status(500)
 			return
 		}
@@ -1248,16 +1231,18 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	router.POST("/sessions", loginUser)                  // POST /sessions to create a session (login)
-	router.POST("/users", signupUser)                    // POST /users to create a user (signup)
-	router.POST("/tokens", generateToken)                // POST /tokens to create a token
-	router.POST("/token-cookies", setTokenCookieHandler) // POST /token-cookies to set a token cookie
-	router.GET("/api/challenge", AuthMiddleware(), retrieveChallenge)
-	router.POST("/signatures/verify", AuthMiddleware(), verifySignature)
-	router.GET("/users/authorize", AuthMiddleware(), authorizeUser)
-	router.POST("/users/upload", AuthMiddleware(), uploadUserData)
-	router.GET("/users/files", AuthMiddleware(), obtainUserFileNames)
-	router.POST("/users/files", AuthMiddleware(), fetchUserFiles)
-	router.DELETE("/users/files", AuthMiddleware(), deleteUserFiles)
+	router.POST("/sessions", loginUser)                                        // POST /sessions to create a session (login)
+	router.POST("/users", signupUser)                                          // POST /users to create a user (signup)
+	router.GET("/users", AuthMiddleware(), signOutUser)                        // GET /users to signout user, clearing cookie info + token from db (signout)
+	router.POST("/tokens", generateToken)                                      // POST /tokens to create a token
+	router.POST("/token-cookies", setTokenCookieHandler)                       // POST /token-cookies to set a token cookie
+	router.GET("/api/challenge", AuthMiddleware(), retrieveChallenge)          // POST /api/challenge to create a challenge for verifying user
+	router.POST("/signatures/verify", AuthMiddleware(), verifySignature)       // POST /signatures/verify to verify a signature for the user
+	router.GET("/users/authorize", AuthMiddleware(), authorizeUser)            // GET /users/authorize gives out user's public key for encrypting
+	router.POST("/users/upload", AuthMiddleware(), uploadUserData)             // POST /users/upload for uploading data to server storage
+	router.GET("/users/files", AuthMiddleware(), obtainUserFileNames)          // GET /users/files for obtaining the file names for a given user, uses stored email to retrieve file names
+	router.POST("/users/files", AuthMiddleware(), fetchUserFile)               // POST /users/files gets one file given the s3path to it, returns as base64 string streamed
+	router.DELETE("/users/files", AuthMiddleware(), deleteUserFiles)           // DELETE /users/files takes a collection of filenames for a specific user and deletes them from metadata storage + s3
+	router.POST("/users/files/metadata", AuthMiddleware(), fetchFileMetadatas) // POST /users/files/metadata for grabbing metadata for a list of specified files for a user
 	router.Run("localhost:8080")
 }
