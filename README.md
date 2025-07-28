@@ -61,3 +61,58 @@ DB_PW=
 DB_HOST=
 DB_NAME=
 ```
+
+## ☁️ Local vs Cloud Storage
+
+Bridges supports both local and cloud storage configurations for encrypted files.
+
+### 🌐 Cloud Storage
+
+- **Encrypted files** are uploaded to an Amazon S3 bucket at:
+s3://<S3_BUCKET>/user_data/<email>/<encrypted-filename>
+
+- **File metadata** is stored in a DynamoDB table named `file_metadata` with the following schema:
+- `email` (S) — partition key
+- `originalFileName` (S) — sort key
+- Additional fields (e.g. `fileId`, `size`, `uploadDate`, `encryptedKey`, `iv`, `mimeType`) may also be stored.
+
+### 🖥️ Local Storage
+
+- **Encrypted files** are saved to the local filesystem under a `user_data/` directory:
+- **File metadata** can still be stored in the same DynamoDB table (`file_metadata`) using `email` and `originalFileName` as keys.
+
+
+## 🧩 REST API Endpoints
+
+All routes are prefixed under `localhost:8080`. Authenticated routes require a valid token and cookie set via `/tokens` and `/token-cookies`.
+
+### 🔐 Authentication & Session
+
+| Method | Endpoint             | Description                                 |
+|--------|----------------------|---------------------------------------------|
+| POST   | `/sessions`          | Login user and create session               |
+| POST   | `/users`             | Register a new user                         |
+| GET    | `/users`             | Sign out user (clears cookie and token)     |
+| POST   | `/tokens`            | Generate new token                          |
+| POST   | `/token-cookies`     | Set a token cookie                          |
+
+### 🛡️ Identity Verification
+
+| Method | Endpoint             | Description                                 |
+|--------|----------------------|---------------------------------------------|
+| GET    | `/api/challenge`     | Generate ECDSA challenge (signed by client) |
+| POST   | `/signatures/verify` | Verify user's ECDSA signature                |
+| GET    | `/users/authorize`   | Get user's public RSA key (for encryption)  |
+
+### 📁 File Management
+
+| Method | Endpoint                     | Description                                                                 |
+|--------|------------------------------|-----------------------------------------------------------------------------|
+| POST   | `/users/upload`              | Upload encrypted file to server (S3 or local)                              |
+| GET    | `/users/files`               | Get list of file names for the authenticated user                          |
+| POST   | `/users/files`               | Download a file by S3 path; returns base64-encoded content                 |
+| DELETE | `/users/files`               | Delete specified files (metadata and blob) for authenticated user          |
+| POST   | `/users/files/metadata`      | Retrieve metadata for a list of specified files (from DynamoDB)            |
+
+> **Note**: All `/users/*` and `/api/*` routes require authentication via token and cookie.
+
