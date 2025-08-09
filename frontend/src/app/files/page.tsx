@@ -4,10 +4,13 @@ import { useRouter } from 'next/navigation';
 // import { decodeReply } from "next/dist/server/app-render/entry-base";
 import Dropzone from 'react-dropzone'
 import JSZip from "jszip";
+import ShareFilesModal from "./ShareFilesModal";
 
 
 
 export default function files() {
+
+  const [showShareFilesModal, setShowShareFilesModal] = useState(false);
 
   type FilePreview = {
     FileName: string
@@ -465,7 +468,7 @@ const deleteFiles = () => {
         </div>
       ) : (
         <>
-          <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
+          <div className="flex flex-col items-center space-y-4 mr-6 -mt-20">
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
                 onClick={downloadFiles}
@@ -480,6 +483,26 @@ const deleteFiles = () => {
             >
                 Delete
             </button>
+
+            <button
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                onClick={() => {setShowShareFilesModal(true)}}
+                style={{ letterSpacing: "2px" }}
+            >
+                Share Selected Files
+            </button>
+
+            {showShareFilesModal &&
+                <ShareFilesModal
+                    open={showShareFilesModal}
+                    selectedFiles={selectedFiles}
+                    onClose={() => setShowShareFilesModal(false)}
+                    onShare={(emails) => {
+                        // Implement your share logic here
+                        setShowShareFilesModal(false);
+                    }}
+                />
+            }
             <Dropzone
                 accept={{ "text/plain": [".txt"] }}
                 maxFiles={1}
