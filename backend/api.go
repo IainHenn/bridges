@@ -1221,6 +1221,42 @@ func deleteUserFiles(c *gin.Context) {
 	}
 }
 
+func verifyUserExists(c *gin.Context) {
+	fmt.Println("are we inside")
+	db, err := getDBAccess()
+
+	if err != nil {
+		c.Status(500) // Failed to connect
+		return
+	}
+
+	type EmailsRequest struct {
+		Email string `json:"email"`
+	}
+
+	var req EmailsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	var count int
+
+	err = db.QueryRow("SELECT COUNT(*) FROM users WHERE email = $1", req.Email).Scan(&count)
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	if count != 1 {
+		c.Status(400)
+		return
+	}
+
+	c.Status(200)
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -1244,5 +1280,6 @@ func main() {
 	router.POST("/users/files", AuthMiddleware(), fetchUserFile)               // POST /users/files gets one file given the s3path to it, returns as base64 string streamed
 	router.DELETE("/users/files", AuthMiddleware(), deleteUserFiles)           // DELETE /users/files takes a collection of filenames for a specific user and deletes them from metadata storage + s3
 	router.POST("/users/files/metadata", AuthMiddleware(), fetchFileMetadatas) // POST /users/files/metadata for grabbing metadata for a list of specified files for a user
+	router.POST("/users/exists", AuthMiddleware(), verifyUserExists)
 	router.Run("localhost:8080")
 }

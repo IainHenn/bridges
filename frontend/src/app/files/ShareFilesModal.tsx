@@ -15,10 +15,10 @@ export default function ShareFilesModal({open, onClose, onShare}){
         const resp = await fetch("http://localhost:8080/users/exists", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: 'include',
         body: JSON.stringify({ email }),
         });
-        const data = await resp.json();
-        if (!data.exists) {
+        if (!resp.ok) {
         setError("Email not found.");
         return;
         }

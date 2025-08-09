@@ -497,8 +497,32 @@ const deleteFiles = () => {
                     open={showShareFilesModal}
                     selectedFiles={selectedFiles}
                     onClose={() => setShowShareFilesModal(false)}
-                    onShare={(emails) => {
-                        // Implement your share logic here
+                    onShare={(emails: string[]) => {
+                        /*fetch("http://localhost:8080/users/verify-emails", {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({ emails })
+                        })
+                        .then(resp => {
+                            if (resp.status != 200) {
+                                console.log("failure");
+                                if (resp.status == 400) {
+                                    resp.json().then(data => {
+                                        if (data.notFoundEmails && data.notFoundEmails.length > 0) {
+                                            alert(`These emails were not found: ${data.notFoundEmails.join(", ")}`);
+                                        }
+                                    });
+                                }
+                            } else {
+                                console.log("success");
+                            }
+                        })
+                        .then(data => {
+                            console.log(data);
+                        })*/
                         setShowShareFilesModal(false);
                     }}
                 />
