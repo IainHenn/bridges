@@ -1305,6 +1305,88 @@ func obtainPublicKeys(c *gin.Context) {
 	c.JSON(200, gin.H{"public_keys": publicKeys})
 }
 
+func shareFilesWithRecipients(c *gin.Context) {
+	type SharedInfo struct {
+		Emails map[string][]map[string]interface{} `json:"sharedInfo"`
+	}
+
+	var sharedInfo SharedInfo
+
+	err := c.BindJSON(&sharedInfo)
+
+	fmt.Println(sharedInfo)
+
+	if err != nil {
+		fmt.Println(err)
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	for email, data := range sharedInfo.Emails {
+		fmt.Println("email")
+		fmt.Println(email)
+		fmt.Println(data)
+		for i := 0; i < len(data); i++ {
+			input := &dynamodb.GetItemInput{
+				TableName: aws.String("shares_data"),
+				Key: map[string]*dynamodb.AttributeValue{
+					"ownerEmail":              {S: aws.String(data[i]["hostEmail"].(string))},
+					"recipientEmail_fileName": {S: aws.String(email + "#" + data[i]["FileName"].(string))},
+				},
+				ProjectionExpression: aws.String("fileStatus"),
+			}
+
+			result, err := db.GetItem(input)
+			if err != nil {
+				fmt.Println(err)
+				c.Status(500)
+				return
+			}
+
+			if result.Item == nil || (result.Item["fileStatus"] == nil || *result.Item["fileStatus"].S != "Accepted") {
+				input := &dynamodb.PutItemInput{
+					TableName: aws.String("shares_data"),
+					Item: map[string]*dynamodb.AttributeValue{
+						"ownerEmail": {
+							S: aws.String(data[i]["hostEmail"].(string)),
+						},
+						"recipientEmail_fileName": {
+							S: aws.String(email + "#" + data[i]["FileName"].(string)),
+						},
+						"encryptedAesKeyForRecipient": {
+							S: aws.String(data[i]["EncryptedAesKeyForRecipient"].(string)),
+						},
+						"s3Path": {
+							S: aws.String(data[i]["S3Path"].(string)),
+						},
+						"fileStatus": {
+							S: aws.String("Pending"),
+						},
+						"lastModified": {
+							S: aws.String(data[i]["lastEncrypted"].(string)),
+						},
+					},
+				}
+
+				_, err = db.PutItem(input)
+				if err != nil {
+					fmt.Println(err)
+					c.Status(500)
+					return
+				}
+			}
+		}
+	}
+	c.Status(200)
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -1331,5 +1413,6 @@ func main() {
 	router.POST("/users/files/metadata", AuthMiddleware(), fetchFileMetadatas) // POST /users/files/metadata for grabbing metadata for a list of specified files for a user
 	router.POST("/users/exists", AuthMiddleware(), verifyUserExists)
 	router.POST("/users/public-keys", AuthMiddleware(), obtainPublicKeys)
+	router.POST("/users/files/share", AuthMiddleware(), shareFilesWithRecipients)
 	router.Run("localhost:8080")
 }

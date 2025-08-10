@@ -603,6 +603,7 @@ const deleteFiles = () => {
                                                 file.EncryptedAesKeyForRecipient = window.btoa(
                                                     String.fromCharCode(...new Uint8Array(encryptedAesKeyForRecipient))
                                                 );
+                                                file.lastEncrypted = new Date().toISOString();
                                                 sharedInfo[email].push(file);
                                             } catch (error) {
                                                 console.error("Failed to decrypt AES key for file:", file.FileName, error);
@@ -610,6 +611,26 @@ const deleteFiles = () => {
                                         }
                                     }
                                     console.log("Shared info: ", sharedInfo);
+                                    fetch("http://localhost:8080/users/files/share", {
+                                        method: 'POST',
+                                        credentials: 'include',
+                                        headers: {
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({sharedInfo})
+                                    })
+                                    .then(resp => {
+                                        if(resp.ok){
+                                            console.log("Nice");
+                                            /*resp.json().then(data => {
+                                                // handle data if needed
+                                                console.log(data);
+                                            });*/
+                                        }
+                                        else {
+                                            console.log("failed");
+                                        }
+                                    })
                                     console.log("success");
                                 })();
                             }
