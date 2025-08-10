@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Dropzone from 'react-dropzone'
 import JSZip from "jszip";
 import ShareFilesModal from "./ShareFilesModal";
+import { AnyARecord } from "dns";
 
 
 
@@ -22,6 +23,7 @@ export default function files() {
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   const [publicKeyEncDec, setPublicKeyEncDec] = useState("");
+  const [hostEmail, setHostEmail] = useState("");
   const [privateKeyEncDec, setPrivateKeyEncDec] = useState("");
   const [privateKeyStatus, setPrivateKeyStatus] = useState<null | "valid" | "invalid">(null);
   const [privateKeyStatusText, setPrivateKeyStatusText] = useState("");
@@ -362,6 +364,7 @@ const deleteFiles = () => {
     })
     .then(data => {
         setPublicKeyEncDec(data.public_key_enc_dec);
+        setHostEmail(data.host_email);
         if (!sessionStorage.getItem("aes_encrypted_key")) {
             // Encrypt a new AES key with the provided public_key_enc_dec and store it
             async function generateAndStoreAesKey() {
@@ -495,34 +498,125 @@ const deleteFiles = () => {
             {showShareFilesModal &&
                 <ShareFilesModal
                     open={showShareFilesModal}
-                    selectedFiles={selectedFiles}
                     onClose={() => setShowShareFilesModal(false)}
                     onShare={(emails: string[]) => {
-                        /*fetch("http://localhost:8080/users/verify-emails", {
+                        fetch("http://localhost:8080/users/files/metadata", {
                             method: 'POST',
                             credentials: 'include',
                             headers: {
                                 "Content-Type": "application/json"
                             },
-                            body: JSON.stringify({ emails })
+                            body: JSON.stringify({ selectedFiles })
                         })
                         .then(resp => {
                             if (resp.status != 200) {
                                 console.log("failure");
-                                if (resp.status == 400) {
-                                    resp.json().then(data => {
-                                        if (data.notFoundEmails && data.notFoundEmails.length > 0) {
-                                            alert(`These emails were not found: ${data.notFoundEmails.join(", ")}`);
-                                        }
-                                    });
-                                }
+                                return
                             } else {
-                                console.log("success");
+                                (async () => {
+                                    const dataObj = await resp.json();
+                                    console.log("Shared files response:", dataObj);
+                                    let sharedInfo: { [email: string]: any[] } = {};
+                                    let decryptedAesKeys: any = {};
+
+                                    // Fetch public keys for all emails
+                                    const pubKeysResp = await fetch("http://localhost:8080/users/public-keys", {
+                                        method: 'POST',
+                                        credentials: 'include',
+                                        headers: {
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({emails})
+                                    });
+                                    if (!pubKeysResp.ok) {
+                                        console.log("inner failure");
+                                        return;
+                                    }
+                                    const pubKeysData = await pubKeysResp.json();
+                                    const pubKeys = pubKeysData.public_keys;
+
+                                    // Helper function
+                                    function base64ToArrayBuffer(base64: string | undefined): ArrayBuffer {
+                                        if (typeof base64 !== "string") {
+                                            throw new Error("Invalid base64 input for base64ToArrayBuffer");
+                                        }
+                                        // Remove whitespace and newlines
+                                        const sanitized = base64.replace(/[\r\n\s]/g, "");
+                                        const binaryString = window.atob(sanitized);
+                                        const len = binaryString.length;
+                                        const bytes = new Uint8Array(len);
+                                        for (let i = 0; i < len; i++) {
+                                            bytes[i] = binaryString.charCodeAt(i);
+                                        }
+                                        return bytes.buffer;
+                                    }
+
+                                    for (const email of emails) {
+                                        sharedInfo[email] = [];
+                                        for (const file of dataObj.files) {
+                                            file['hostEmail'] = hostEmail;
+                                            try {
+                                                // Decrypt the encrypted AES key for the file using the user's private key
+                                                if (!privateKeyEncDec) {
+                                                    alert("Please upload your private key first.");
+                                                    return;
+                                                }
+                                                const privateKey = await window.crypto.subtle.importKey(
+                                                    "pkcs8",
+                                                    base64ToArrayBuffer(privateKeyEncDec),
+                                                    {
+                                                        name: "RSA-OAEP",
+                                                        hash: "SHA-256"
+                                                    },
+                                                    false,
+                                                    ["decrypt"]
+                                                );
+
+                                                let decryptedAesKey: ArrayBuffer;
+                                                if (!(file.FileName in decryptedAesKeys)) {
+                                                    decryptedAesKey = await window.crypto.subtle.decrypt(
+                                                        { name: "RSA-OAEP" },
+                                                        privateKey,
+                                                        base64ToArrayBuffer(file.EncryptedAesKey)
+                                                    );
+                                                    decryptedAesKeys[file.FileName] = decryptedAesKey;
+                                                } else {
+                                                    decryptedAesKey = decryptedAesKeys[file.FileName];
+                                                }
+
+                                                const pubKeyBase64 = pubKeys[email];
+                                                const pubKey = await window.crypto.subtle.importKey(
+                                                    "spki",
+                                                    base64ToArrayBuffer(pubKeyBase64),
+                                                    {
+                                                        name: "RSA-OAEP",
+                                                        hash: "SHA-256"
+                                                    },
+                                                    false,
+                                                    ["encrypt"]
+                                                );
+                                                const encryptedAesKeyForRecipient = await window.crypto.subtle.encrypt(
+                                                    { name: "RSA-OAEP" },
+                                                    pubKey,
+                                                    decryptedAesKey
+                                                );
+                                                file.EncryptedAesKeyForRecipient = window.btoa(
+                                                    String.fromCharCode(...new Uint8Array(encryptedAesKeyForRecipient))
+                                                );
+                                                sharedInfo[email].push(file);
+                                            } catch (error) {
+                                                console.error("Failed to decrypt AES key for file:", file.FileName, error);
+                                            }
+                                        }
+                                    }
+                                    console.log("Shared info: ", sharedInfo);
+                                    console.log("success");
+                                })();
                             }
                         })
                         .then(data => {
                             console.log(data);
-                        })*/
+                        })
                         setShowShareFilesModal(false);
                     }}
                 />

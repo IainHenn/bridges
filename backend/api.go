@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 
 	"crypto"
@@ -524,7 +525,7 @@ func verifySignature(c *gin.Context) {
 }
 
 func authorizeUser(c *gin.Context) {
-	_, exists := c.Get("email")
+	email, exists := c.Get("email")
 	if !exists {
 		c.Status(401)
 		return
@@ -536,7 +537,7 @@ func authorizeUser(c *gin.Context) {
 		return
 	}
 
-	c.IndentedJSON(200, gin.H{"public_key_enc_dec": public_key_enc_dec})
+	c.IndentedJSON(200, gin.H{"public_key_enc_dec": public_key_enc_dec, "host_email": email})
 }
 
 func uploadUserData(c *gin.Context) {
@@ -1257,6 +1258,53 @@ func verifyUserExists(c *gin.Context) {
 	c.Status(200)
 }
 
+func obtainPublicKeys(c *gin.Context) {
+	type Emails struct {
+		EmailsList []string `json:"emails"`
+	}
+
+	var EmailsRequest Emails
+
+	err := c.BindJSON(&EmailsRequest)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := getDBAccess()
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	// Prepare response map
+	publicKeys := make(map[string]string)
+	for _, email := range EmailsRequest.EmailsList {
+		publicKeys[email] = ""
+	}
+
+	// Build the query and arguments
+	query := "SELECT email, pub_key_enc_dec FROM users WHERE email = ANY($1)"
+	rows, err := db.Query(query, pq.Array(EmailsRequest.EmailsList))
+	if err != nil {
+		c.Status(500)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var email, pubKeyEncDec string
+		if err := rows.Scan(&email, &pubKeyEncDec); err != nil {
+			c.Status(500)
+			return
+		}
+		publicKeys[email] = pubKeyEncDec
+	}
+	c.JSON(200, gin.H{"public_keys": publicKeys})
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -1267,8 +1315,9 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	router.POST("/sessions", loginUser)                                        // POST /sessions to create a session (login)
-	router.POST("/users", signupUser)                                          // POST /users to create a user (signup)
+	router.POST("/sessions", loginUser) // POST /sessions to create a session (login)
+	router.POST("/users", signupUser)   // POST /users to create a user (signup)
+	router.GET("/")
 	router.GET("/users", AuthMiddleware(), signOutUser)                        // GET /users to signout user, clearing cookie info + token from db (signout)
 	router.POST("/tokens", generateToken)                                      // POST /tokens to create a token
 	router.POST("/token-cookies", setTokenCookieHandler)                       // POST /token-cookies to set a token cookie
@@ -1281,5 +1330,6 @@ func main() {
 	router.DELETE("/users/files", AuthMiddleware(), deleteUserFiles)           // DELETE /users/files takes a collection of filenames for a specific user and deletes them from metadata storage + s3
 	router.POST("/users/files/metadata", AuthMiddleware(), fetchFileMetadatas) // POST /users/files/metadata for grabbing metadata for a list of specified files for a user
 	router.POST("/users/exists", AuthMiddleware(), verifyUserExists)
+	router.POST("/users/public-keys", AuthMiddleware(), obtainPublicKeys)
 	router.Run("localhost:8080")
 }
