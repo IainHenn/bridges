@@ -1464,6 +1464,121 @@ func retrieveInboxFiles(c *gin.Context) {
 	c.JSON(200, gin.H{"inbox_files": inboxFiles})
 }
 
+func acceptInboxFiles(c *gin.Context) {
+
+	type AcceptedFiles struct {
+		Files []map[string]string `json:"accepted_files"`
+	}
+
+	var acceptedFiles AcceptedFiles
+
+	err := c.BindJSON(&acceptedFiles)
+
+	db, err := initDynamoDB()
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	for _, item := range acceptedFiles.Files {
+		// Changes all the statuses of a given set of files
+		input := &dynamodb.UpdateItemInput{
+			TableName: aws.String("shares_data"),
+			Key: map[string]*dynamodb.AttributeValue{
+				"fileName": {S: aws.String(item["fileName"])},
+			},
+			UpdateExpression: aws.String("set fileStatus = :val"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":val": {S: aws.String("Accepted")},
+			},
+		}
+
+		_, err := db.UpdateItem(input)
+		if err != nil {
+			fmt.Println(err)
+			c.Status(500)
+			return
+		}
+	}
+
+	c.Status(200)
+}
+
+func deleteInboxFiles(c *gin.Context) {
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	// Retrieve all inbox files for the user using BatchGetItem
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String("shares_data"),
+		KeyConditionExpression: aws.String("recipientEmail = :recipient"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":recipient":   {S: aws.String(email.(string))},
+			":pendingStat": {S: aws.String("Pending")},
+		},
+		ProjectionExpression: aws.String("ownerEmail, fileName, fileStatus, encryptedAesKeyForRecipient, s3Path, lastModified"),
+		FilterExpression:     aws.String("fileStatus = :pendingStat"),
+	}
+
+	result, err := db.Query(input)
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	type InboxFile struct {
+		OwnerEmail                  string `json:"ownerEmail"`
+		FileName                    string `json:"fileName"`
+		FileStatus                  string `json:"fileStatus"`
+		EncryptedAesKeyForRecipient string `json:"encryptedAesKeyForRecipient"`
+		S3Path                      string `json:"s3Path"`
+		LastModified                string `json:"lastModified"`
+	}
+
+	var inboxFiles []InboxFile
+
+	fmt.Println("result.Items, ", result.Items)
+	for _, item := range result.Items {
+		ownerEmailAttr, ok1 := item["ownerEmail"]
+		fileNameAttr, ok2 := item["fileName"]
+		fileStatusAttr, ok3 := item["fileStatus"]
+		encryptedAesKeyAttr, ok4 := item["encryptedAesKeyForRecipient"]
+		s3PathAttr, ok5 := item["s3Path"]
+		lastModifiedAttr, ok6 := item["lastModified"]
+
+		if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 &&
+			ownerEmailAttr.S != nil && fileNameAttr.S != nil &&
+			fileStatusAttr.S != nil && encryptedAesKeyAttr.S != nil &&
+			s3PathAttr.S != nil && lastModifiedAttr.S != nil {
+
+			inboxFiles = append(inboxFiles, InboxFile{
+				OwnerEmail:                  *ownerEmailAttr.S,
+				FileName:                    *fileNameAttr.S,
+				FileStatus:                  *fileStatusAttr.S,
+				EncryptedAesKeyForRecipient: *encryptedAesKeyAttr.S,
+				S3Path:                      *s3PathAttr.S,
+				LastModified:                *lastModifiedAttr.S,
+			})
+		}
+	}
+
+	fmt.Println(inboxFiles)
+	c.JSON(200, gin.H{"inbox_files": inboxFiles})
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
