@@ -1337,8 +1337,8 @@ func shareFilesWithRecipients(c *gin.Context) {
 			input := &dynamodb.GetItemInput{
 				TableName: aws.String("shares_data"),
 				Key: map[string]*dynamodb.AttributeValue{
-					"ownerEmail":              {S: aws.String(data[i]["hostEmail"].(string))},
-					"recipientEmail_fileName": {S: aws.String(email + "#" + data[i]["FileName"].(string))},
+					"recipientEmail": {S: aws.String(email)},
+					"fileName":       {S: aws.String(data[i]["FileName"].(string))},
 				},
 				ProjectionExpression: aws.String("fileStatus"),
 			}
@@ -1354,11 +1354,14 @@ func shareFilesWithRecipients(c *gin.Context) {
 				input := &dynamodb.PutItemInput{
 					TableName: aws.String("shares_data"),
 					Item: map[string]*dynamodb.AttributeValue{
+						"recipientEmail": {
+							S: aws.String(email),
+						},
+						"fileName": {
+							S: aws.String(data[i]["FileName"].(string)),
+						},
 						"ownerEmail": {
 							S: aws.String(data[i]["hostEmail"].(string)),
-						},
-						"recipientEmail_fileName": {
-							S: aws.String(email + "#" + data[i]["FileName"].(string)),
 						},
 						"encryptedAesKeyForRecipient": {
 							S: aws.String(data[i]["EncryptedAesKeyForRecipient"].(string)),
@@ -1385,6 +1388,80 @@ func shareFilesWithRecipients(c *gin.Context) {
 		}
 	}
 	c.Status(200)
+}
+
+func retrieveInboxFiles(c *gin.Context) {
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	// Retrieve all inbox files for the user using BatchGetItem
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String("shares_data"),
+		KeyConditionExpression: aws.String("recipientEmail = :recipient"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":recipient":   {S: aws.String(email.(string))},
+			":pendingStat": {S: aws.String("Pending")},
+		},
+		ProjectionExpression: aws.String("ownerEmail, fileName, fileStatus, encryptedAesKeyForRecipient, s3Path, lastModified"),
+		FilterExpression:     aws.String("fileStatus = :pendingStat"),
+	}
+
+	result, err := db.Query(input)
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	type InboxFile struct {
+		OwnerEmail                  string `json:"ownerEmail"`
+		FileName                    string `json:"fileName"`
+		FileStatus                  string `json:"fileStatus"`
+		EncryptedAesKeyForRecipient string `json:"encryptedAesKeyForRecipient"`
+		S3Path                      string `json:"s3Path"`
+		LastModified                string `json:"lastModified"`
+	}
+
+	var inboxFiles []InboxFile
+
+	fmt.Println("result.Items, ", result.Items)
+	for _, item := range result.Items {
+		ownerEmailAttr, ok1 := item["ownerEmail"]
+		fileNameAttr, ok2 := item["fileName"]
+		fileStatusAttr, ok3 := item["fileStatus"]
+		encryptedAesKeyAttr, ok4 := item["encryptedAesKeyForRecipient"]
+		s3PathAttr, ok5 := item["s3Path"]
+		lastModifiedAttr, ok6 := item["lastModified"]
+
+		if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 &&
+			ownerEmailAttr.S != nil && fileNameAttr.S != nil &&
+			fileStatusAttr.S != nil && encryptedAesKeyAttr.S != nil &&
+			s3PathAttr.S != nil && lastModifiedAttr.S != nil {
+
+			inboxFiles = append(inboxFiles, InboxFile{
+				OwnerEmail:                  *ownerEmailAttr.S,
+				FileName:                    *fileNameAttr.S,
+				FileStatus:                  *fileStatusAttr.S,
+				EncryptedAesKeyForRecipient: *encryptedAesKeyAttr.S,
+				S3Path:                      *s3PathAttr.S,
+				LastModified:                *lastModifiedAttr.S,
+			})
+		}
+	}
+
+	fmt.Println(inboxFiles)
+	c.JSON(200, gin.H{"inbox_files": inboxFiles})
 }
 
 func main() {
@@ -1414,5 +1491,6 @@ func main() {
 	router.POST("/users/exists", AuthMiddleware(), verifyUserExists)
 	router.POST("/users/public-keys", AuthMiddleware(), obtainPublicKeys)
 	router.POST("/users/files/share", AuthMiddleware(), shareFilesWithRecipients)
+	router.GET("/users/files/inbox", AuthMiddleware(), retrieveInboxFiles)
 	router.Run("localhost:8080")
 }
