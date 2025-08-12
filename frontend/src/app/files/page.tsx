@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Dropzone from 'react-dropzone'
 import JSZip from "jszip";
 import ShareFilesModal from "./ShareFilesModal";
+import InboxModal from "../inbox/InboxModal";
 import { AnyARecord } from "dns";
 
 
@@ -32,6 +33,7 @@ export default function files() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [loading, setLoading] = useState(true); // loading state
   const [loadingDots, setLoadingDots] = useState(0);
+
   type FileMetadata = {
     fullPath: string;
     uploadDate: Date;
@@ -471,7 +473,7 @@ const deleteFiles = () => {
         </div>
       ) : (
         <>
-          <div className="flex flex-col items-center space-y-4 mr-6 -mt-20">
+          <div className="flex flex-col items-center space-y-4 mr-6 -mt-0">
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
                 onClick={downloadFiles}
@@ -493,6 +495,14 @@ const deleteFiles = () => {
                 style={{ letterSpacing: "2px" }}
             >
                 Share Selected Files
+            </button>
+
+            <button
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                onClick={() => router.push("/inbox")}
+                style={{ letterSpacing: "2px" }}
+            >
+                Inbox
             </button>
 
             {showShareFilesModal &&
