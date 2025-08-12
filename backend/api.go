@@ -1506,10 +1506,24 @@ func acceptInboxFiles(c *gin.Context) {
 }
 
 func deleteInboxFiles(c *gin.Context) {
+
 	email, exists := c.Get("email")
 
 	if !exists {
 		c.Status(401)
+		return
+	}
+
+	type FilesToDelete struct {
+		Files []string `json:"files_to_delete"`
+	}
+
+	var files FilesToDelete
+
+	err := c.BindJSON(&files)
+
+	if err != nil {
+		c.Status(400)
 		return
 	}
 
@@ -1520,63 +1534,52 @@ func deleteInboxFiles(c *gin.Context) {
 		return
 	}
 
-	// Retrieve all inbox files for the user using BatchGetItem
-	input := &dynamodb.QueryInput{
-		TableName:              aws.String("shares_data"),
-		KeyConditionExpression: aws.String("recipientEmail = :recipient"),
-		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
-			":recipient":   {S: aws.String(email.(string))},
-			":pendingStat": {S: aws.String("Pending")},
-		},
-		ProjectionExpression: aws.String("ownerEmail, fileName, fileStatus, encryptedAesKeyForRecipient, s3Path, lastModified"),
-		FilterExpression:     aws.String("fileStatus = :pendingStat"),
+	remainder := len(files.Files) % 25
+	groups := (len(files.Files) / 25)
+
+	if remainder != 0 {
+		groups += 1
 	}
 
-	result, err := db.Query(input)
-	if err != nil {
-		fmt.Println(err)
-		c.Status(500)
-		return
-	}
+	for i := 0; i < groups; i++ {
+		start := i * 25
+		end := start + 25
 
-	type InboxFile struct {
-		OwnerEmail                  string `json:"ownerEmail"`
-		FileName                    string `json:"fileName"`
-		FileStatus                  string `json:"fileStatus"`
-		EncryptedAesKeyForRecipient string `json:"encryptedAesKeyForRecipient"`
-		S3Path                      string `json:"s3Path"`
-		LastModified                string `json:"lastModified"`
-	}
+		if end > len(files.Files) {
+			end = len(files.Files)
+		}
 
-	var inboxFiles []InboxFile
-
-	fmt.Println("result.Items, ", result.Items)
-	for _, item := range result.Items {
-		ownerEmailAttr, ok1 := item["ownerEmail"]
-		fileNameAttr, ok2 := item["fileName"]
-		fileStatusAttr, ok3 := item["fileStatus"]
-		encryptedAesKeyAttr, ok4 := item["encryptedAesKeyForRecipient"]
-		s3PathAttr, ok5 := item["s3Path"]
-		lastModifiedAttr, ok6 := item["lastModified"]
-
-		if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 &&
-			ownerEmailAttr.S != nil && fileNameAttr.S != nil &&
-			fileStatusAttr.S != nil && encryptedAesKeyAttr.S != nil &&
-			s3PathAttr.S != nil && lastModifiedAttr.S != nil {
-
-			inboxFiles = append(inboxFiles, InboxFile{
-				OwnerEmail:                  *ownerEmailAttr.S,
-				FileName:                    *fileNameAttr.S,
-				FileStatus:                  *fileStatusAttr.S,
-				EncryptedAesKeyForRecipient: *encryptedAesKeyAttr.S,
-				S3Path:                      *s3PathAttr.S,
-				LastModified:                *lastModifiedAttr.S,
+		var keys []map[string]*dynamodb.AttributeValue
+		for _, fileName := range files.Files[start:end] {
+			keys = append(keys, map[string]*dynamodb.AttributeValue{
+				"recipientEmail": {S: aws.String(email.(string))},
+				"fileName":       {S: aws.String(fileName)},
 			})
+		}
+
+		writeRequests := make([]*dynamodb.WriteRequest, len(keys))
+		for i, key := range keys {
+			writeRequests[i] = &dynamodb.WriteRequest{
+				DeleteRequest: &dynamodb.DeleteRequest{
+					Key: key,
+				},
+			}
+		}
+
+		deleteInput := &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]*dynamodb.WriteRequest{
+				"shares_data": writeRequests,
+			},
+		}
+
+		_, err = db.BatchWriteItem(deleteInput)
+		if err != nil {
+			c.Status(500)
+			return
 		}
 	}
 
-	fmt.Println(inboxFiles)
-	c.JSON(200, gin.H{"inbox_files": inboxFiles})
+	c.Status(200)
 }
 
 func main() {
@@ -1607,5 +1610,7 @@ func main() {
 	router.POST("/users/public-keys", AuthMiddleware(), obtainPublicKeys)
 	router.POST("/users/files/share", AuthMiddleware(), shareFilesWithRecipients)
 	router.GET("/users/files/inbox", AuthMiddleware(), retrieveInboxFiles)
+	router.POST("/users/files/inbox", AuthMiddleware(), acceptInboxFiles)
+	router.DELETE("/users/files/inbox", AuthMiddleware(), deleteInboxFiles)
 	router.Run("localhost:8080")
 }
