@@ -1466,16 +1466,30 @@ func retrieveInboxFiles(c *gin.Context) {
 
 func acceptInboxFiles(c *gin.Context) {
 
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
 	type AcceptedFiles struct {
-		Files []map[string]string `json:"accepted_files"`
+		Files []map[string]string `json:"files"`
 	}
 
 	var acceptedFiles AcceptedFiles
 
 	err := c.BindJSON(&acceptedFiles)
 
+	if err != nil {
+		fmt.Println(err)
+		c.Status(400)
+		return
+	}
+
 	db, err := initDynamoDB()
 	if err != nil {
+		fmt.Println("here")
 		fmt.Println(err)
 		c.Status(500)
 		return
@@ -1486,7 +1500,8 @@ func acceptInboxFiles(c *gin.Context) {
 		input := &dynamodb.UpdateItemInput{
 			TableName: aws.String("shares_data"),
 			Key: map[string]*dynamodb.AttributeValue{
-				"fileName": {S: aws.String(item["fileName"])},
+				"recipientEmail": {S: aws.String(email.(string))},
+				"fileName":       {S: aws.String(item["fileName"])},
 			},
 			UpdateExpression: aws.String("set fileStatus = :val"),
 			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
@@ -1515,7 +1530,7 @@ func deleteInboxFiles(c *gin.Context) {
 	}
 
 	type FilesToDelete struct {
-		Files []string `json:"files_to_delete"`
+		Files []string `json:"files"`
 	}
 
 	var files FilesToDelete
@@ -1523,6 +1538,7 @@ func deleteInboxFiles(c *gin.Context) {
 	err := c.BindJSON(&files)
 
 	if err != nil {
+		fmt.Println(err)
 		c.Status(400)
 		return
 	}
