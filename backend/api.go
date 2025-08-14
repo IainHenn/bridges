@@ -754,6 +754,7 @@ func obtainUserFileNames(c *gin.Context) {
 	type fileDTO struct {
 		FileName     string
 		LastModified string
+		OwnedBy      string
 	}
 
 	var files []fileDTO
@@ -765,11 +766,45 @@ func obtainUserFileNames(c *gin.Context) {
 			fileObj := fileDTO{
 				FileName:     *fileNameAttr.S,
 				LastModified: *lastModifiedAttr.S,
+				OwnedBy:      "Self",
 			}
 			files = append(files, fileObj)
 		}
 	}
 
+	input2 := &dynamodb.QueryInput{
+		TableName:              aws.String("shares_data"),
+		KeyConditionExpression: aws.String("recipientEmail = :email"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":email":  {S: aws.String(emailStr)},
+			":status": {S: aws.String("Accepted")},
+		},
+		FilterExpression:     aws.String("fileStatus = :status"),
+		ProjectionExpression: aws.String("fileName,lastModified, ownerEmail"),
+	}
+
+	result2, err := db.Query(input2)
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	for _, item := range result2.Items {
+		fileNameAttr, ok1 := item["fileName"]
+		lastModifiedAttr, ok2 := item["lastModified"]
+		hostEmailAttr, ok3 := item["ownerEmail"]
+		if ok1 && fileNameAttr.S != nil && ok2 && lastModifiedAttr.S != nil && ok3 && hostEmailAttr.S != nil {
+			fileObj := fileDTO{
+				FileName:     *fileNameAttr.S,
+				LastModified: *lastModifiedAttr.S,
+				OwnedBy:      *hostEmailAttr.S,
+			}
+			files = append(files, fileObj)
+		}
+	}
+
+	fmt.Println(files)
 	c.IndentedJSON(200, gin.H{"files": files})
 }
 

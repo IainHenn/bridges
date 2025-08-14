@@ -17,6 +17,7 @@ export default function files() {
   type FilePreview = {
     FileName: string
     LastModified: string
+    OwnedBy: string
   }
   
   const router = useRouter();
@@ -449,7 +450,8 @@ const deleteFiles = () => {
             setFiles(
                 data.files.map((file: any) => ({
                     FileName: file.FileName,
-                    LastModified: file.LastModified
+                    LastModified: file.LastModified,
+                    OwnedBy: file.OwnedBy,
                 }))
             );
         }
@@ -931,6 +933,9 @@ const deleteFiles = () => {
                                         <th className="px-4 py-2 text-left border-b-2 border-white text-white font-mono">
                                             Last Modified
                                         </th>
+                                        <th className="px-4 py-2 text-left border-b-2 border-white text-white font-mono">
+                                            Owned By
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -962,6 +967,9 @@ const deleteFiles = () => {
                                                 !isNaN(new Date(file.LastModified).getTime())
                                                     ? new Date(file.LastModified).toLocaleString()
                                                     : "loading..."}
+                                            </td>
+                                            <td className="px-4 py-2 text-white font-mono">
+                                                {file.OwnedBy}
                                             </td>
                                         </tr>
                                     ))}
