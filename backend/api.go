@@ -1073,90 +1073,22 @@ func deleteUserFiles(c *gin.Context) {
 
 	var files []string
 
-	if len(filesReq.FileNameList) > 25 {
-		remainder := len(filesReq.FileNameList) % 25
-		groups := (len(filesReq.FileNameList) / 25)
+	remainder := len(filesReq.FileNameList) % 25
+	groups := (len(filesReq.FileNameList) / 25)
 
-		if remainder != 0 {
-			groups += 1
+	if remainder != 0 {
+		groups += 1
+	}
+
+	for i := 0; i < groups; i++ {
+		start := i * 25
+		end := start + 25
+
+		if end > len(filesReq.FileNameList) {
+			end = len(filesReq.FileNameList)
 		}
-
-		for i := 0; i < groups; i++ {
-			start := i * 25
-			end := start + 25
-
-			if end > len(filesReq.FileNameList) {
-				end = len(filesReq.FileNameList)
-			}
-			var keys []map[string]*dynamodb.AttributeValue
-			for _, fileName := range filesReq.FileNameList[start:end] {
-				keys = append(keys, map[string]*dynamodb.AttributeValue{
-					"email":            {S: aws.String(emailStr)},
-					"originalFileName": {S: aws.String(fileName)},
-				})
-			}
-
-			input := &dynamodb.BatchGetItemInput{
-				RequestItems: map[string]*dynamodb.KeysAndAttributes{
-					"file_metadata": {
-						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path"),
-					},
-				},
-			}
-
-			result, err := db.BatchGetItem(input)
-			if err != nil {
-				c.Status(500)
-				return
-			}
-
-			writeRequests := make([]*dynamodb.WriteRequest, len(keys))
-			for i, key := range keys {
-				writeRequests[i] = &dynamodb.WriteRequest{
-					DeleteRequest: &dynamodb.DeleteRequest{
-						Key: key,
-					},
-				}
-			}
-
-			deleteInput := &dynamodb.BatchWriteItemInput{
-				RequestItems: map[string][]*dynamodb.WriteRequest{
-					"file_metadata": writeRequests,
-				},
-			}
-
-			_, err = db.BatchWriteItem(deleteInput)
-			if err != nil {
-				c.Status(500)
-				return
-			}
-
-			for _, items := range result.Responses {
-				for _, item := range items {
-					s3PathAttr, ok := item["s3Path"]
-					originalFileNameAttr, ok2 := item["originalFileName"]
-					if ok && s3PathAttr.S != nil && ok2 && originalFileNameAttr.S != nil {
-						input := &s3.DeleteObjectInput{
-							Bucket: aws.String(s3Bucket),
-							Key:    aws.String(*s3PathAttr.S),
-						}
-
-						_, err := s3Client.DeleteObject(input)
-						if err != nil {
-							c.Status(500)
-							return
-						}
-
-						files = append(files, *originalFileNameAttr.S)
-					}
-				}
-			}
-		}
-		c.IndentedJSON(200, gin.H{"files": files})
-	} else {
 		var keys []map[string]*dynamodb.AttributeValue
-		for _, fileName := range filesReq.FileNameList {
+		for _, fileName := range filesReq.FileNameList[start:end] {
 			keys = append(keys, map[string]*dynamodb.AttributeValue{
 				"email":            {S: aws.String(emailStr)},
 				"originalFileName": {S: aws.String(fileName)},
@@ -1201,9 +1133,9 @@ func deleteUserFiles(c *gin.Context) {
 
 		for _, items := range result.Responses {
 			for _, item := range items {
-				originalFileNameAttr, ok1 := item["originalFileName"]
-				s3PathAttr, ok2 := item["s3Path"]
-				if ok1 && originalFileNameAttr.S != nil && ok2 && s3PathAttr.S != nil {
+				s3PathAttr, ok := item["s3Path"]
+				originalFileNameAttr, ok2 := item["originalFileName"]
+				if ok && s3PathAttr.S != nil && ok2 && originalFileNameAttr.S != nil {
 					input := &s3.DeleteObjectInput{
 						Bucket: aws.String(s3Bucket),
 						Key:    aws.String(*s3PathAttr.S),
@@ -1214,12 +1146,13 @@ func deleteUserFiles(c *gin.Context) {
 						c.Status(500)
 						return
 					}
+
 					files = append(files, *originalFileNameAttr.S)
 				}
 			}
 		}
-		c.IndentedJSON(200, gin.H{"files": files})
 	}
+	c.IndentedJSON(200, gin.H{"files": files})
 }
 
 func verifyUserExists(c *gin.Context) {
