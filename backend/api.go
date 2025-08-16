@@ -1040,20 +1040,28 @@ func deleteUserFiles(c *gin.Context) {
 		return
 	}
 
+	type File struct {
+		FileName     string `json:"FileName"`
+		LastModified string `json:"LastModified"`
+		OwnedBy      string `json:"OwnedBy"`
+	}
+
 	type Files struct {
-		FileNameList []string `json:"selectedFiles"`
+		MatchedFiles []File `json:"matchedFiles"`
 	}
 
 	var filesReq Files
 
 	err := c.BindJSON(&filesReq)
 
+	fmt.Println("Files to delete: ", filesReq)
+
 	if err != nil {
 		c.Status(400)
 		return
 	}
 
-	if len(filesReq.FileNameList) == 0 {
+	if len(filesReq.MatchedFiles) == 0 {
 		c.Status(400)
 		return
 	}
@@ -1086,9 +1094,10 @@ func deleteUserFiles(c *gin.Context) {
 
 	var files []string
 
-	remainder := len(filesReq.FileNameList) % 25
-	groups := (len(filesReq.FileNameList) / 25)
+	remainder := len(filesReq.MatchedFiles) % 25
+	groups := (len(filesReq.MatchedFiles) / 25)
 
+	fmt.Println("right before batch delete")
 	if remainder != 0 {
 		groups += 1
 	}
@@ -1097,14 +1106,23 @@ func deleteUserFiles(c *gin.Context) {
 		start := i * 25
 		end := start + 25
 
-		if end > len(filesReq.FileNameList) {
-			end = len(filesReq.FileNameList)
+		if end > len(filesReq.MatchedFiles) {
+			end = len(filesReq.MatchedFiles)
 		}
 		var keys []map[string]*dynamodb.AttributeValue
-		for _, fileName := range filesReq.FileNameList[start:end] {
+		var keysShared []map[string]*dynamodb.AttributeValue
+
+		for _, file := range filesReq.MatchedFiles[start:end] {
 			keys = append(keys, map[string]*dynamodb.AttributeValue{
 				"email":            {S: aws.String(emailStr)},
-				"originalFileName": {S: aws.String(fileName)},
+				"originalFileName": {S: aws.String(file.FileName)},
+			})
+		}
+
+		for _, file := range filesReq.MatchedFiles[start:end] {
+			keysShared = append(keysShared, map[string]*dynamodb.AttributeValue{
+				"recipientEmail": {S: aws.String(emailStr)},
+				"fileName":       {S: aws.String(file.FileName)},
 			})
 		}
 
@@ -1119,6 +1137,7 @@ func deleteUserFiles(c *gin.Context) {
 
 		result, err := db.BatchGetItem(input)
 		if err != nil {
+			print(err)
 			c.Status(500)
 			return
 		}
@@ -1140,6 +1159,7 @@ func deleteUserFiles(c *gin.Context) {
 
 		_, err = db.BatchWriteItem(deleteInput)
 		if err != nil {
+			print(err)
 			c.Status(500)
 			return
 		}
@@ -1156,11 +1176,60 @@ func deleteUserFiles(c *gin.Context) {
 
 					_, err := s3Client.DeleteObject(input)
 					if err != nil {
+						fmt.Println(err)
 						c.Status(500)
 						return
 					}
 
 					files = append(files, *originalFileNameAttr.S)
+				}
+			}
+		}
+
+		inputShared := &dynamodb.BatchGetItemInput{
+			RequestItems: map[string]*dynamodb.KeysAndAttributes{
+				"shares_data": {
+					Keys:                 keysShared,
+					ProjectionExpression: aws.String("fileName, s3Path"),
+				},
+			},
+		}
+
+		resultShared, err := db.BatchGetItem(inputShared)
+		if err != nil {
+			fmt.Println(err)
+			c.Status(500)
+			return
+		}
+
+		writeRequestsShared := make([]*dynamodb.WriteRequest, len(keysShared))
+		for i, key := range keysShared {
+			writeRequestsShared[i] = &dynamodb.WriteRequest{
+				DeleteRequest: &dynamodb.DeleteRequest{
+					Key: key,
+				},
+			}
+		}
+
+		deleteInputShared := &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]*dynamodb.WriteRequest{
+				"shares_data": writeRequestsShared,
+			},
+		}
+
+		_, err = db.BatchWriteItem(deleteInputShared)
+		if err != nil {
+			fmt.Println(err)
+			c.Status(500)
+			return
+		}
+
+		for _, items := range resultShared.Responses {
+			for _, item := range items {
+				s3PathAttr, ok := item["s3Path"]
+				fileNameAttr, ok2 := item["fileName"]
+				if ok && s3PathAttr.S != nil && ok2 && fileNameAttr.S != nil {
+					files = append(files, *fileNameAttr.S)
 				}
 			}
 		}

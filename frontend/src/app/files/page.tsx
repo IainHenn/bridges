@@ -319,6 +319,7 @@ const downloadFiles = async () => {
 
 const deleteFiles = () => {
     setIsDownloading(false);
+    let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
     fetch("http://localhost:8080/users/files", {
         method: "DELETE",
         credentials: "include",
@@ -326,7 +327,7 @@ const deleteFiles = () => {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            selectedFiles
+            matchedFiles
         })
     })
     .then(resp => {
