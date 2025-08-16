@@ -4,14 +4,20 @@ import { useRouter } from 'next/navigation';
 // import { decodeReply } from "next/dist/server/app-render/entry-base";
 import Dropzone from 'react-dropzone'
 import JSZip from "jszip";
+import ShareFilesModal from "./ShareFilesModal";
+import InboxModal from "../inbox/InboxModal";
+import { AnyARecord } from "dns";
 
 
 
 export default function files() {
 
+  const [showShareFilesModal, setShowShareFilesModal] = useState(false);
+
   type FilePreview = {
     FileName: string
     LastModified: string
+    OwnedBy: string
   }
   
   const router = useRouter();
@@ -19,6 +25,7 @@ export default function files() {
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   const [publicKeyEncDec, setPublicKeyEncDec] = useState("");
+  const [hostEmail, setHostEmail] = useState("");
   const [privateKeyEncDec, setPrivateKeyEncDec] = useState("");
   const [privateKeyStatus, setPrivateKeyStatus] = useState<null | "valid" | "invalid">(null);
   const [privateKeyStatusText, setPrivateKeyStatusText] = useState("");
@@ -27,6 +34,7 @@ export default function files() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [loading, setLoading] = useState(true); // loading state
   const [loadingDots, setLoadingDots] = useState(0);
+
   type FileMetadata = {
     fullPath: string;
     uploadDate: Date;
@@ -114,6 +122,8 @@ const downloadFiles = async () => {
     setIsDownloading(true);
     setDownloadProgress(0);
 
+    let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
+
     // Fetch file metadata for selected files
     const metadataResp = await fetch("http://localhost:8080/users/files/metadata", {
         method: "POST",
@@ -121,7 +131,7 @@ const downloadFiles = async () => {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ selectedFiles })
+        body: JSON.stringify({ matchedFiles })
     });
 
     const metadataData = await metadataResp.json();
@@ -304,6 +314,7 @@ const downloadFiles = async () => {
 
 const deleteFiles = () => {
     setIsDownloading(false);
+    let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
     fetch("http://localhost:8080/users/files", {
         method: "DELETE",
         credentials: "include",
@@ -311,7 +322,7 @@ const deleteFiles = () => {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            selectedFiles
+            matchedFiles
         })
     })
     .then(resp => {
@@ -359,6 +370,7 @@ const deleteFiles = () => {
     })
     .then(data => {
         setPublicKeyEncDec(data.public_key_enc_dec);
+        setHostEmail(data.host_email);
         if (!sessionStorage.getItem("aes_encrypted_key")) {
             // Encrypt a new AES key with the provided public_key_enc_dec and store it
             async function generateAndStoreAesKey() {
@@ -441,7 +453,8 @@ const deleteFiles = () => {
             setFiles(
                 data.files.map((file: any) => ({
                     FileName: file.FileName,
-                    LastModified: file.LastModified
+                    LastModified: file.LastModified,
+                    OwnedBy: file.OwnedBy,
                 }))
             );
         }
@@ -465,7 +478,7 @@ const deleteFiles = () => {
         </div>
       ) : (
         <>
-          <div className="flex flex-col items-center space-y-4 mr-6 -mt-45">
+          <div className="flex flex-col items-center space-y-4 mr-6 -mt-0">
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
                 onClick={downloadFiles}
@@ -480,6 +493,153 @@ const deleteFiles = () => {
             >
                 Delete
             </button>
+
+            <button
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                onClick={() => {setShowShareFilesModal(true)}}
+                style={{ letterSpacing: "2px" }}
+            >
+                Share Selected Files
+            </button>
+
+            <button
+                className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                onClick={() => router.push("/inbox")}
+                style={{ letterSpacing: "2px" }}
+            >
+                Inbox
+            </button>
+
+            {showShareFilesModal &&
+                <ShareFilesModal
+                    open={showShareFilesModal}
+                    onClose={() => setShowShareFilesModal(false)}
+                    onShare={(emails: string[]) => {
+                        let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
+                        fetch("http://localhost:8080/users/files/metadata", {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({ matchedFiles })
+                        })
+                        .then(resp => {
+                            if (resp.status != 200) {
+                                alert("Failed to share files, try again later.");
+                                return
+                            } else {
+                                (async () => {
+                                    const dataObj = await resp.json();
+                                    let sharedInfo: { [email: string]: any[] } = {};
+                                    let decryptedAesKeys: any = {};
+
+                                    // Fetch public keys for all emails
+                                    const pubKeysResp = await fetch("http://localhost:8080/users/public-keys", {
+                                        method: 'POST',
+                                        credentials: 'include',
+                                        headers: {
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({emails})
+                                    });
+                                    if (!pubKeysResp.ok) {
+                                        alert("Failed to share files, try again later.");
+                                        return;
+                                    }
+                                    const pubKeysData = await pubKeysResp.json();
+                                    const pubKeys = pubKeysData.public_keys;
+
+                                    // Helper function
+                                    function base64ToArrayBuffer(base64: string | undefined): ArrayBuffer {
+                                        if (typeof base64 !== "string") {
+                                            throw new Error("Invalid base64 input for base64ToArrayBuffer");
+                                        }
+                                        // Remove whitespace and newlines
+                                        const sanitized = base64.replace(/[\r\n\s]/g, "");
+                                        const binaryString = window.atob(sanitized);
+                                        const len = binaryString.length;
+                                        const bytes = new Uint8Array(len);
+                                        for (let i = 0; i < len; i++) {
+                                            bytes[i] = binaryString.charCodeAt(i);
+                                        }
+                                        return bytes.buffer;
+                                    }
+
+                                    for (const email of emails) {
+                                        sharedInfo[email] = [];
+                                        for (const file of dataObj.files) {
+                                            file['hostEmail'] = hostEmail;
+                                            try {
+                                                // Decrypt the encrypted AES key for the file using the user's private key
+                                                if (!privateKeyEncDec) {
+                                                    alert("Please upload your private key first.");
+                                                    return;
+                                                }
+                                                const privateKey = await window.crypto.subtle.importKey(
+                                                    "pkcs8",
+                                                    base64ToArrayBuffer(privateKeyEncDec),
+                                                    {
+                                                        name: "RSA-OAEP",
+                                                        hash: "SHA-256"
+                                                    },
+                                                    false,
+                                                    ["decrypt"]
+                                                );
+
+                                                let decryptedAesKey: ArrayBuffer;
+                                                if (!(file.FileName in decryptedAesKeys)) {
+                                                    decryptedAesKey = await window.crypto.subtle.decrypt(
+                                                        { name: "RSA-OAEP" },
+                                                        privateKey,
+                                                        base64ToArrayBuffer(file.EncryptedAesKey)
+                                                    );
+                                                    decryptedAesKeys[file.FileName] = decryptedAesKey;
+                                                } else {
+                                                    decryptedAesKey = decryptedAesKeys[file.FileName];
+                                                }
+
+                                                const pubKeyBase64 = pubKeys[email];
+                                                const pubKey = await window.crypto.subtle.importKey(
+                                                    "spki",
+                                                    base64ToArrayBuffer(pubKeyBase64),
+                                                    {
+                                                        name: "RSA-OAEP",
+                                                        hash: "SHA-256"
+                                                    },
+                                                    false,
+                                                    ["encrypt"]
+                                                );
+                                                const encryptedAesKeyForRecipient = await window.crypto.subtle.encrypt(
+                                                    { name: "RSA-OAEP" },
+                                                    pubKey,
+                                                    decryptedAesKey
+                                                );
+                                                file.EncryptedAesKeyForRecipient = window.btoa(
+                                                    String.fromCharCode(...new Uint8Array(encryptedAesKeyForRecipient))
+                                                );
+                                                file.lastEncrypted = new Date().toISOString();
+                                                sharedInfo[email].push(file);
+                                            } catch (error) {
+                                                console.error("Failed to decrypt AES key for file:", file.FileName, error);
+                                            }
+                                        }
+                                    }
+                                    fetch("http://localhost:8080/users/files/share", {
+                                        method: 'POST',
+                                        credentials: 'include',
+                                        headers: {
+                                            'Content-Type': 'application/json'
+                                        },
+                                        body: JSON.stringify({sharedInfo})
+                                    });
+                                })();
+                            }
+                        })
+                        setShowShareFilesModal(false);
+                    }}
+                />
+            }
             <Dropzone
                 accept={{ "text/plain": [".txt"] }}
                 maxFiles={1}
@@ -560,47 +720,48 @@ const deleteFiles = () => {
                             {...getRootProps({
                                 onDrop: undefined, // disable Dropzone's default onDrop
                                 onDragOver: (e: React.DragEvent) => e.preventDefault(),
-                                onDrop: (event: React.DragEvent) => {
+                                onDrop: async (event: React.DragEvent) => {
                                     event.preventDefault();
                                     const items = event.dataTransfer.items;
                                     const droppedFiles: string[] = [];
                                     let pending = 0;
                                     const fileMetadatas: FileMetadata[] = [];
 
+                                    // Helper functions
+                                    function base64ToArrayBuffer(base64: string): ArrayBuffer {
+                                        const binaryString = window.atob(base64);
+                                        const len = binaryString.length;
+                                        const bytes = new Uint8Array(len);
+                                        for (let i = 0; i < len; i++) {
+                                            bytes[i] = binaryString.charCodeAt(i);
+                                        }
+                                        return bytes.buffer;
+                                    }
+                                    function arrayBufferToBase64(buffer: ArrayBuffer) {
+                                        const bytes = new Uint8Array(buffer);
+                                        let binary = "";
+                                        for (let i = 0; i < bytes.byteLength; i++) {
+                                            binary += String.fromCharCode(bytes[i]);
+                                        }
+                                        return window.btoa(binary);
+                                    }
+
+                                    // Collect all file names for backend request
+                                    const allFileNames: string[] = [];
+
                                     function traverseFileTree(item: any, path = "") {
                                         let uploadStarted = false;
                                         if (item.isFile) {
                                             pending++;
                                             item.file(async (file: File) => {
+                                                const fullPath = path + file.name;
+                                                allFileNames.push(fullPath);
                                                 let file_metadata = {
                                                     ...file,
-                                                    fullPath: path + file.name,
+                                                    fullPath,
                                                     uploadDate: new Date(),
                                                 };
-                                                droppedFiles.push(path + file.name);
 
-                                                function base64ToArrayBuffer(base64: string): ArrayBuffer {
-                                                    const binaryString = window.atob(base64);
-                                                    const len = binaryString.length;
-                                                    const bytes = new Uint8Array(len);
-                                                    for (let i = 0; i < len; i++) {
-                                                        bytes[i] = binaryString.charCodeAt(i);
-                                                    }
-                                                    return bytes.buffer;
-                                                }
-
-                                                function arrayBufferToBase64(buffer: ArrayBuffer) {
-                                                    const bytes = new Uint8Array(buffer);
-                                                    let binary = "";
-                                                    for (let i = 0; i < bytes.byteLength; i++) {
-                                                        binary += String.fromCharCode(bytes[i]);
-                                                    }
-                                                    return window.btoa(binary);
-                                                }
-
-                                                const ivBytes = window.crypto.getRandomValues(
-                                                    new Uint8Array(12)
-                                                );
                                                 const fileBlob = new Blob([file]);
                                                 const fileType = file.type;
 
@@ -633,43 +794,134 @@ const deleteFiles = () => {
                                                     ["encrypt"]
                                                 );
 
-                                                // Generate a new AES key for this file
-                                                const aesKey = await window.crypto.subtle.generateKey(
-                                                    {
-                                                        name: "AES-GCM",
-                                                        length: 256,
-                                                    },
-                                                    true,
-                                                    ["encrypt", "decrypt"]
-                                                );
+                                                // Request encrypted AES keys for all uploaded file names
+                                                let aesKeysData: Record<string, { encryptedAesKey: string, iv: string }> = {};
+                                                try {
+                                                    const aesKeysResp = await fetch(
+                                                        "http://localhost:8080/users/files/encrypted-keys",
+                                                        {
+                                                            method: "POST",
+                                                            credentials: "include",
+                                                            headers: {
+                                                                "Content-Type": "application/json",
+                                                            },
+                                                            body: JSON.stringify({
+                                                                fileNames: [fullPath],
+                                                            }),
+                                                        }
+                                                    );
+                                                    if (aesKeysResp.ok) {
+                                                        aesKeysData = await aesKeysResp.json();
+                                                    }
+                                                } catch (error) {
+                                                    console.error(
+                                                        "Error fetching /users/files/encrypted-keys:",
+                                                        error
+                                                    );
+                                                }
 
-                                                // Encrypt the file with the AES key
-                                                const encryptedData = await window.crypto.subtle.encrypt(
-                                                    {
-                                                        name: "AES-GCM",
-                                                        iv: ivBytes,
-                                                    },
-                                                    aesKey,
-                                                    await fileBlob.arrayBuffer()
-                                                );
+                                                let iv: string;
+                                                let encryptedAesKey: string;
+                                                let encryptedFile: string;
 
-                                                // Export and encrypt the AES key with the user's public RSA key
-                                                const rawAesKey = await window.crypto.subtle.exportKey(
-                                                    "raw",
-                                                    aesKey
-                                                );
-                                                const encryptedAesKeyBuffer =
-                                                    await window.crypto.subtle.encrypt(
-                                                        { name: "RSA-OAEP" },
-                                                        publicKey,
-                                                        rawAesKey
+                                                if (
+                                                    aesKeysData &&
+                                                    aesKeysData[fullPath] &&
+                                                    aesKeysData[fullPath].encryptedAesKey &&
+                                                    aesKeysData[fullPath].iv
+                                                ) {
+                                                    // Use backend-provided AES key and IV
+                                                    iv = aesKeysData[fullPath].iv;
+                                                    encryptedAesKey = aesKeysData[fullPath].encryptedAesKey;
+
+                                                    // Decrypt AES key with user's private key
+                                                    let aesKeyRaw: ArrayBuffer;
+                                                    try {
+                                                        const privateKey = await window.crypto.subtle.importKey(
+                                                            "pkcs8",
+                                                            base64ToArrayBuffer(privateKeyEncDec),
+                                                            {
+                                                                name: "RSA-OAEP",
+                                                                hash: "SHA-256"
+                                                            },
+                                                            false,
+                                                            ["decrypt"]
+                                                        );
+                                                        aesKeyRaw = await window.crypto.subtle.decrypt(
+                                                            { name: "RSA-OAEP" },
+                                                            privateKey,
+                                                            base64ToArrayBuffer(encryptedAesKey)
+                                                        );
+                                                    } catch (error) {
+                                                        console.error("Failed to decrypt AES key from backend:", error);
+                                                        pending--;
+                                                        return;
+                                                    }
+
+                                                    // Import decrypted AES key
+                                                    const aesKey = await window.crypto.subtle.importKey(
+                                                        "raw",
+                                                        aesKeyRaw,
+                                                        { name: "AES-GCM" },
+                                                        false,
+                                                        ["encrypt", "decrypt"]
                                                     );
 
-                                                const iv = arrayBufferToBase64(ivBytes.buffer);
-                                                const encryptedAesKey =
-                                                    arrayBufferToBase64(encryptedAesKeyBuffer);
-                                                const encryptedFile =
-                                                    arrayBufferToBase64(encryptedData);
+                                                    // Encrypt the file with the AES key and backend-provided IV
+                                                    const encryptedData = await window.crypto.subtle.encrypt(
+                                                        {
+                                                            name: "AES-GCM",
+                                                            iv: base64ToArrayBuffer(iv),
+                                                        },
+                                                        aesKey,
+                                                        await fileBlob.arrayBuffer()
+                                                    );
+                                                    encryptedFile = arrayBufferToBase64(encryptedData);
+
+                                                } else {
+                                                    // Generate a new AES key for this file
+                                                    const aesKey = await window.crypto.subtle.generateKey(
+                                                        {
+                                                            name: "AES-GCM",
+                                                            length: 256,
+                                                        },
+                                                        true,
+                                                        ["encrypt", "decrypt"]
+                                                    );
+
+                                                    // Generate IV
+                                                    const ivBytes = window.crypto.getRandomValues(
+                                                        new Uint8Array(12)
+                                                    );
+
+                                                    // Encrypt the file with the AES key
+                                                    const encryptedData = await window.crypto.subtle.encrypt(
+                                                        {
+                                                            name: "AES-GCM",
+                                                            iv: ivBytes,
+                                                        },
+                                                        aesKey,
+                                                        await fileBlob.arrayBuffer()
+                                                    );
+
+                                                    // Export and encrypt the AES key with the user's public RSA key
+                                                    const rawAesKey = await window.crypto.subtle.exportKey(
+                                                        "raw",
+                                                        aesKey
+                                                    );
+                                                    const encryptedAesKeyBuffer =
+                                                        await window.crypto.subtle.encrypt(
+                                                            { name: "RSA-OAEP" },
+                                                            publicKey,
+                                                            rawAesKey
+                                                        );
+
+                                                    iv = arrayBufferToBase64(ivBytes.buffer);
+                                                    encryptedAesKey =
+                                                        arrayBufferToBase64(encryptedAesKeyBuffer);
+                                                    encryptedFile =
+                                                        arrayBufferToBase64(encryptedData);
+                                                }
 
                                                 file_metadata = {
                                                     ...file_metadata,
@@ -685,7 +937,7 @@ const deleteFiles = () => {
 
                                                 if (!uploadStarted && pending === 0) {
                                                     uploadStarted = true;
-                                                    console.dir(fileMetadatas);
+                                                    // Upload files
                                                     try {
                                                         const response = await fetch(
                                                             "http://localhost:8080/users/upload",
@@ -759,6 +1011,9 @@ const deleteFiles = () => {
                                         <th className="px-4 py-2 text-left border-b-2 border-white text-white font-mono">
                                             Last Modified
                                         </th>
+                                        <th className="px-4 py-2 text-left border-b-2 border-white text-white font-mono">
+                                            Owned By
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -790,6 +1045,9 @@ const deleteFiles = () => {
                                                 !isNaN(new Date(file.LastModified).getTime())
                                                     ? new Date(file.LastModified).toLocaleString()
                                                     : "loading..."}
+                                            </td>
+                                            <td className="px-4 py-2 text-white font-mono">
+                                                {file.OwnedBy}
                                             </td>
                                         </tr>
                                     ))}

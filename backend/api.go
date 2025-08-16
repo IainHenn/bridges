@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 
 	"crypto"
@@ -524,7 +525,7 @@ func verifySignature(c *gin.Context) {
 }
 
 func authorizeUser(c *gin.Context) {
-	_, exists := c.Get("email")
+	email, exists := c.Get("email")
 	if !exists {
 		c.Status(401)
 		return
@@ -536,7 +537,7 @@ func authorizeUser(c *gin.Context) {
 		return
 	}
 
-	c.IndentedJSON(200, gin.H{"public_key_enc_dec": public_key_enc_dec})
+	c.IndentedJSON(200, gin.H{"public_key_enc_dec": public_key_enc_dec, "host_email": email})
 }
 
 func uploadUserData(c *gin.Context) {
@@ -753,6 +754,7 @@ func obtainUserFileNames(c *gin.Context) {
 	type fileDTO struct {
 		FileName     string
 		LastModified string
+		OwnedBy      string
 	}
 
 	var files []fileDTO
@@ -764,6 +766,38 @@ func obtainUserFileNames(c *gin.Context) {
 			fileObj := fileDTO{
 				FileName:     *fileNameAttr.S,
 				LastModified: *lastModifiedAttr.S,
+				OwnedBy:      "Self",
+			}
+			files = append(files, fileObj)
+		}
+	}
+
+	input2 := &dynamodb.QueryInput{
+		TableName:              aws.String("shares_data"),
+		KeyConditionExpression: aws.String("recipientEmail = :email"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":email":  {S: aws.String(emailStr)},
+			":status": {S: aws.String("Accepted")},
+		},
+		FilterExpression:     aws.String("fileStatus = :status"),
+		ProjectionExpression: aws.String("fileName,lastModified, ownerEmail"),
+	}
+
+	result2, err := db.Query(input2)
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	for _, item := range result2.Items {
+		fileNameAttr, ok1 := item["fileName"]
+		lastModifiedAttr, ok2 := item["lastModified"]
+		hostEmailAttr, ok3 := item["ownerEmail"]
+		if ok1 && fileNameAttr.S != nil && ok2 && lastModifiedAttr.S != nil && ok3 && hostEmailAttr.S != nil {
+			fileObj := fileDTO{
+				FileName:     *fileNameAttr.S,
+				LastModified: *lastModifiedAttr.S,
+				OwnedBy:      *hostEmailAttr.S,
 			}
 			files = append(files, fileObj)
 		}
@@ -835,7 +869,6 @@ func fetchUserFile(c *gin.Context) {
 	c.Status(200)
 	c.Writer.Write(decoded)
 }
-
 func fetchFileMetadatas(c *gin.Context) {
 	email, exists := c.Get("email")
 	if !exists {
@@ -843,26 +876,30 @@ func fetchFileMetadatas(c *gin.Context) {
 		return
 	}
 
+	type File struct {
+		FileName     string `json:"FileName"`
+		LastModified string `json:"LastModified"`
+		OwnedBy      string `json:"OwnedBy"`
+	}
+
 	type Files struct {
-		FileNameList []string `json:"selectedFiles"`
+		MatchedFiles []File `json:"matchedFiles"`
 	}
 
 	var filesReq Files
 
 	err := c.BindJSON(&filesReq)
-
 	if err != nil {
 		c.Status(400)
 		return
 	}
 
-	if len(filesReq.FileNameList) == 0 {
+	if len(filesReq.MatchedFiles) == 0 {
 		c.Status(400)
 		return
 	}
 
 	db, err := initDynamoDB()
-
 	if err != nil {
 		c.Status(500)
 		return
@@ -874,101 +911,78 @@ func fetchFileMetadatas(c *gin.Context) {
 		return
 	}
 
-	if len(filesReq.FileNameList) > 100 {
-		type fileDTO struct {
-			FileName        string
-			FileType        string
-			Iv              string
-			EncryptedAesKey string
-			S3Path          string
-			FileSize        int
+	type fileDTO struct {
+		FileName        string
+		FileType        string
+		Iv              string
+		EncryptedAesKey string
+		S3Path          string
+		FileSize        int
+	}
+
+	var files []fileDTO
+
+	batchSize := 100
+	total := len(filesReq.MatchedFiles)
+	for i := 0; i < total; i += batchSize {
+		end := i + batchSize
+		if end > total {
+			end = total
 		}
-
-		var files []fileDTO
-		remainder := len(filesReq.FileNameList) % 100
-		groups := (len(filesReq.FileNameList) / 100)
-
-		if remainder != 0 {
-			groups += 1
+		var keys []map[string]*dynamodb.AttributeValue
+		var sharesToFetch []struct {
+			RecipientEmail string
+			FileName       string
+			OwnerEmail     string
 		}
-
-		for i := 0; i < groups; i++ {
-			start := i * 100
-			end := start + 100
-
-			if end > len(filesReq.FileNameList) {
-				end = len(filesReq.FileNameList)
-			}
-			var keys []map[string]*dynamodb.AttributeValue
-			for _, fileName := range filesReq.FileNameList[start:end] {
+		for _, file := range filesReq.MatchedFiles[i:end] {
+			if file.OwnedBy == "Self" {
 				keys = append(keys, map[string]*dynamodb.AttributeValue{
 					"email":            {S: aws.String(emailStr)},
-					"originalFileName": {S: aws.String(fileName)},
+					"originalFileName": {S: aws.String(file.FileName)},
+				})
+			} else {
+				// For shared files, we need to fetch metadata from file_metadata and encrypted key from shares_data
+				keys = append(keys, map[string]*dynamodb.AttributeValue{
+					"email":            {S: aws.String(file.OwnedBy)},
+					"originalFileName": {S: aws.String(file.FileName)},
+				})
+				sharesToFetch = append(sharesToFetch, struct {
+					RecipientEmail string
+					FileName       string
+					OwnerEmail     string
+				}{
+					RecipientEmail: emailStr,
+					FileName:       file.FileName,
+					OwnerEmail:     file.OwnedBy,
 				})
 			}
-
-			input := &dynamodb.BatchGetItemInput{
-				RequestItems: map[string]*dynamodb.KeysAndAttributes{
-					"file_metadata": {
-						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv, fileSize"),
-					},
-				},
-			}
-
-			result, err := db.BatchGetItem(input)
-			if err != nil {
-				c.Status(500)
-				return
-			}
-
-			for _, items := range result.Responses {
-				for _, item := range items {
-					fileNameAttr, ok1 := item["originalFileName"]
-					s3PathAttr, ok2 := item["s3Path"]
-					fileTypeAttr, ok3 := item["FileType"]
-					ivAttr, ok4 := item["iv"]
-					fileSizeAttr, ok5 := item["fileSize"]
-					encryptedAesKeyAttr, ok6 := item["EncryptedAesKey"]
-					if ok1 && fileNameAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil && ok2 && s3PathAttr.S != nil {
-
-						size, err := strconv.Atoi(*fileSizeAttr.N)
-						if err != nil {
-							c.Status(500)
-							return
-						}
-
-						fileObj := fileDTO{
-							FileName:        *fileNameAttr.S,
-							FileType:        *fileTypeAttr.S,
-							Iv:              *ivAttr.S,
-							S3Path:          *s3PathAttr.S,
-							EncryptedAesKey: *encryptedAesKeyAttr.S,
-							FileSize:        size,
-						}
-						files = append(files, fileObj)
-					}
-				}
-			}
-		}
-
-		c.IndentedJSON(200, gin.H{"files": files})
-	} else {
-		var keys []map[string]*dynamodb.AttributeValue
-		for _, fileName := range filesReq.FileNameList {
-			keys = append(keys, map[string]*dynamodb.AttributeValue{
-				"email":            {S: aws.String(emailStr)},
-				"originalFileName": {S: aws.String(fileName)},
-			})
 		}
 
 		input := &dynamodb.BatchGetItemInput{
 			RequestItems: map[string]*dynamodb.KeysAndAttributes{
 				"file_metadata": {
 					Keys:                 keys,
-					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey, fileSize"),
+					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv, fileSize"),
 				},
 			},
+		}
+
+		// If there are shared files, fetch their encrypted keys from shares_data
+		sharedKeys := make(map[string]string)
+		for _, share := range sharesToFetch {
+			shareInput := &dynamodb.GetItemInput{
+				TableName: aws.String("shares_data"),
+				Key: map[string]*dynamodb.AttributeValue{
+					"recipientEmail": {S: aws.String(share.RecipientEmail)},
+					"fileName":       {S: aws.String(share.FileName)},
+				},
+				ProjectionExpression: aws.String("encryptedAesKeyForRecipient"),
+			}
+			shareResult, err := db.GetItem(shareInput)
+			if err == nil && shareResult.Item != nil && shareResult.Item["encryptedAesKeyForRecipient"] != nil {
+				sharedKeys[share.FileName] = *shareResult.Item["encryptedAesKeyForRecipient"].S
+			}
 		}
 
 		result, err := db.BatchGetItem(input)
@@ -976,17 +990,6 @@ func fetchFileMetadatas(c *gin.Context) {
 			c.Status(500)
 			return
 		}
-
-		type fileDTO struct {
-			FileName        string
-			FileType        string
-			Iv              string
-			EncryptedAesKey string
-			S3Path          string
-			FileSize        int
-		}
-
-		var files []fileDTO
 
 		for _, items := range result.Responses {
 			for _, item := range items {
@@ -996,11 +999,18 @@ func fetchFileMetadatas(c *gin.Context) {
 				ivAttr, ok4 := item["iv"]
 				encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
 				fileSizeAttr, ok6 := item["fileSize"]
-				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
+				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil &&
+					ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil &&
+					ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
 					size, err := strconv.Atoi(*fileSizeAttr.N)
 					if err != nil {
 						c.Status(500)
 						return
+					}
+
+					encryptedAesKey := *encryptedAesKeyAttr.S
+					if sharedKey, found := sharedKeys[*fileNameAttr.S]; found {
+						encryptedAesKey = sharedKey
 					}
 
 					fileObj := fileDTO{
@@ -1008,15 +1018,15 @@ func fetchFileMetadatas(c *gin.Context) {
 						FileType:        *fileTypeAttr.S,
 						Iv:              *ivAttr.S,
 						S3Path:          *s3PathAttr.S,
-						EncryptedAesKey: *encryptedAesKeyAttr.S,
+						EncryptedAesKey: encryptedAesKey,
 						FileSize:        size,
 					}
 					files = append(files, fileObj)
 				}
 			}
 		}
-		c.IndentedJSON(200, gin.H{"files": files})
 	}
+	c.IndentedJSON(200, gin.H{"files": files})
 }
 
 func deleteUserFiles(c *gin.Context) {
@@ -1026,8 +1036,14 @@ func deleteUserFiles(c *gin.Context) {
 		return
 	}
 
+	type File struct {
+		FileName     string `json:"FileName"`
+		LastModified string `json:"LastModified"`
+		OwnedBy      string `json:"OwnedBy"`
+	}
+
 	type Files struct {
-		FileNameList []string `json:"selectedFiles"`
+		MatchedFiles []File `json:"matchedFiles"`
 	}
 
 	var filesReq Files
@@ -1039,7 +1055,7 @@ func deleteUserFiles(c *gin.Context) {
 		return
 	}
 
-	if len(filesReq.FileNameList) == 0 {
+	if len(filesReq.MatchedFiles) == 0 {
 		c.Status(400)
 		return
 	}
@@ -1072,93 +1088,34 @@ func deleteUserFiles(c *gin.Context) {
 
 	var files []string
 
-	if len(filesReq.FileNameList) > 25 {
-		remainder := len(filesReq.FileNameList) % 25
-		groups := (len(filesReq.FileNameList) / 25)
+	remainder := len(filesReq.MatchedFiles) % 25
+	groups := (len(filesReq.MatchedFiles) / 25)
 
-		if remainder != 0 {
-			groups += 1
+	if remainder != 0 {
+		groups += 1
+	}
+
+	for i := 0; i < groups; i++ {
+		start := i * 25
+		end := start + 25
+
+		if end > len(filesReq.MatchedFiles) {
+			end = len(filesReq.MatchedFiles)
 		}
-
-		for i := 0; i < groups; i++ {
-			start := i * 25
-			end := start + 25
-
-			if end > len(filesReq.FileNameList) {
-				end = len(filesReq.FileNameList)
-			}
-			var keys []map[string]*dynamodb.AttributeValue
-			for _, fileName := range filesReq.FileNameList[start:end] {
-				keys = append(keys, map[string]*dynamodb.AttributeValue{
-					"email":            {S: aws.String(emailStr)},
-					"originalFileName": {S: aws.String(fileName)},
-				})
-			}
-
-			input := &dynamodb.BatchGetItemInput{
-				RequestItems: map[string]*dynamodb.KeysAndAttributes{
-					"file_metadata": {
-						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path"),
-					},
-				},
-			}
-
-			result, err := db.BatchGetItem(input)
-			if err != nil {
-				c.Status(500)
-				return
-			}
-
-			writeRequests := make([]*dynamodb.WriteRequest, len(keys))
-			for i, key := range keys {
-				writeRequests[i] = &dynamodb.WriteRequest{
-					DeleteRequest: &dynamodb.DeleteRequest{
-						Key: key,
-					},
-				}
-			}
-
-			deleteInput := &dynamodb.BatchWriteItemInput{
-				RequestItems: map[string][]*dynamodb.WriteRequest{
-					"file_metadata": writeRequests,
-				},
-			}
-
-			_, err = db.BatchWriteItem(deleteInput)
-			if err != nil {
-				c.Status(500)
-				return
-			}
-
-			for _, items := range result.Responses {
-				for _, item := range items {
-					s3PathAttr, ok := item["s3Path"]
-					originalFileNameAttr, ok2 := item["originalFileName"]
-					if ok && s3PathAttr.S != nil && ok2 && originalFileNameAttr.S != nil {
-						input := &s3.DeleteObjectInput{
-							Bucket: aws.String(s3Bucket),
-							Key:    aws.String(*s3PathAttr.S),
-						}
-
-						_, err := s3Client.DeleteObject(input)
-						if err != nil {
-							c.Status(500)
-							return
-						}
-
-						files = append(files, *originalFileNameAttr.S)
-					}
-				}
-			}
-		}
-		c.IndentedJSON(200, gin.H{"files": files})
-	} else {
 		var keys []map[string]*dynamodb.AttributeValue
-		for _, fileName := range filesReq.FileNameList {
+		var keysShared []map[string]*dynamodb.AttributeValue
+
+		for _, file := range filesReq.MatchedFiles[start:end] {
 			keys = append(keys, map[string]*dynamodb.AttributeValue{
 				"email":            {S: aws.String(emailStr)},
-				"originalFileName": {S: aws.String(fileName)},
+				"originalFileName": {S: aws.String(file.FileName)},
+			})
+		}
+
+		for _, file := range filesReq.MatchedFiles[start:end] {
+			keysShared = append(keysShared, map[string]*dynamodb.AttributeValue{
+				"recipientEmail": {S: aws.String(emailStr)},
+				"fileName":       {S: aws.String(file.FileName)},
 			})
 		}
 
@@ -1173,6 +1130,7 @@ func deleteUserFiles(c *gin.Context) {
 
 		result, err := db.BatchGetItem(input)
 		if err != nil {
+			print(err)
 			c.Status(500)
 			return
 		}
@@ -1194,15 +1152,16 @@ func deleteUserFiles(c *gin.Context) {
 
 		_, err = db.BatchWriteItem(deleteInput)
 		if err != nil {
+			print(err)
 			c.Status(500)
 			return
 		}
 
 		for _, items := range result.Responses {
 			for _, item := range items {
-				originalFileNameAttr, ok1 := item["originalFileName"]
-				s3PathAttr, ok2 := item["s3Path"]
-				if ok1 && originalFileNameAttr.S != nil && ok2 && s3PathAttr.S != nil {
+				s3PathAttr, ok := item["s3Path"]
+				originalFileNameAttr, ok2 := item["originalFileName"]
+				if ok && s3PathAttr.S != nil && ok2 && originalFileNameAttr.S != nil {
 					input := &s3.DeleteObjectInput{
 						Bucket: aws.String(s3Bucket),
 						Key:    aws.String(*s3PathAttr.S),
@@ -1213,12 +1172,471 @@ func deleteUserFiles(c *gin.Context) {
 						c.Status(500)
 						return
 					}
+
 					files = append(files, *originalFileNameAttr.S)
 				}
 			}
 		}
-		c.IndentedJSON(200, gin.H{"files": files})
+
+		inputShared := &dynamodb.BatchGetItemInput{
+			RequestItems: map[string]*dynamodb.KeysAndAttributes{
+				"shares_data": {
+					Keys:                 keysShared,
+					ProjectionExpression: aws.String("fileName, s3Path"),
+				},
+			},
+		}
+
+		resultShared, err := db.BatchGetItem(inputShared)
+		if err != nil {
+			c.Status(500)
+			return
+		}
+
+		writeRequestsShared := make([]*dynamodb.WriteRequest, len(keysShared))
+		for i, key := range keysShared {
+			writeRequestsShared[i] = &dynamodb.WriteRequest{
+				DeleteRequest: &dynamodb.DeleteRequest{
+					Key: key,
+				},
+			}
+		}
+
+		deleteInputShared := &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]*dynamodb.WriteRequest{
+				"shares_data": writeRequestsShared,
+			},
+		}
+
+		_, err = db.BatchWriteItem(deleteInputShared)
+		if err != nil {
+			c.Status(500)
+			return
+		}
+
+		for _, items := range resultShared.Responses {
+			for _, item := range items {
+				s3PathAttr, ok := item["s3Path"]
+				fileNameAttr, ok2 := item["fileName"]
+				if ok && s3PathAttr.S != nil && ok2 && fileNameAttr.S != nil {
+					files = append(files, *fileNameAttr.S)
+				}
+			}
+		}
 	}
+	c.IndentedJSON(200, gin.H{"files": files})
+}
+
+func verifyUserExists(c *gin.Context) {
+	db, err := getDBAccess()
+
+	if err != nil {
+		c.Status(500) // Failed to connect
+		return
+	}
+
+	type EmailsRequest struct {
+		Email string `json:"email"`
+	}
+
+	var req EmailsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	var count int
+
+	err = db.QueryRow("SELECT COUNT(*) FROM users WHERE email = $1", req.Email).Scan(&count)
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	if count != 1 {
+		c.Status(400)
+		return
+	}
+
+	c.Status(200)
+}
+
+func obtainPublicKeys(c *gin.Context) {
+	type Emails struct {
+		EmailsList []string `json:"emails"`
+	}
+
+	var EmailsRequest Emails
+
+	err := c.BindJSON(&EmailsRequest)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := getDBAccess()
+
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	// Prepare response map
+	publicKeys := make(map[string]string)
+	for _, email := range EmailsRequest.EmailsList {
+		publicKeys[email] = ""
+	}
+
+	// Build the query and arguments
+	query := "SELECT email, pub_key_enc_dec FROM users WHERE email = ANY($1)"
+	rows, err := db.Query(query, pq.Array(EmailsRequest.EmailsList))
+	if err != nil {
+		c.Status(500)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var email, pubKeyEncDec string
+		if err := rows.Scan(&email, &pubKeyEncDec); err != nil {
+			c.Status(500)
+			return
+		}
+		publicKeys[email] = pubKeyEncDec
+	}
+	c.JSON(200, gin.H{"public_keys": publicKeys})
+}
+
+func shareFilesWithRecipients(c *gin.Context) {
+	type SharedInfo struct {
+		Emails map[string][]map[string]interface{} `json:"sharedInfo"`
+	}
+
+	var sharedInfo SharedInfo
+
+	err := c.BindJSON(&sharedInfo)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	for email, data := range sharedInfo.Emails {
+		for i := 0; i < len(data); i++ {
+			input := &dynamodb.GetItemInput{
+				TableName: aws.String("shares_data"),
+				Key: map[string]*dynamodb.AttributeValue{
+					"recipientEmail": {S: aws.String(email)},
+					"fileName":       {S: aws.String(data[i]["FileName"].(string))},
+				},
+				ProjectionExpression: aws.String("fileStatus"),
+			}
+
+			result, err := db.GetItem(input)
+			if err != nil {
+				c.Status(500)
+				return
+			}
+
+			if result.Item == nil || (result.Item["fileStatus"] == nil || *result.Item["fileStatus"].S != "Accepted") {
+				input := &dynamodb.PutItemInput{
+					TableName: aws.String("shares_data"),
+					Item: map[string]*dynamodb.AttributeValue{
+						"recipientEmail": {
+							S: aws.String(email),
+						},
+						"fileName": {
+							S: aws.String(data[i]["FileName"].(string)),
+						},
+						"ownerEmail": {
+							S: aws.String(data[i]["hostEmail"].(string)),
+						},
+						"encryptedAesKeyForRecipient": {
+							S: aws.String(data[i]["EncryptedAesKeyForRecipient"].(string)),
+						},
+						"s3Path": {
+							S: aws.String(data[i]["S3Path"].(string)),
+						},
+						"fileStatus": {
+							S: aws.String("Pending"),
+						},
+						"lastModified": {
+							S: aws.String(data[i]["lastEncrypted"].(string)),
+						},
+					},
+				}
+
+				_, err = db.PutItem(input)
+				if err != nil {
+					c.Status(500)
+					return
+				}
+			}
+		}
+	}
+	c.Status(200)
+}
+
+func retrieveInboxFiles(c *gin.Context) {
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	// Retrieve all inbox files for the user using BatchGetItem
+	input := &dynamodb.QueryInput{
+		TableName:              aws.String("shares_data"),
+		KeyConditionExpression: aws.String("recipientEmail = :recipient"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":recipient":   {S: aws.String(email.(string))},
+			":pendingStat": {S: aws.String("Pending")},
+		},
+		ProjectionExpression: aws.String("ownerEmail, fileName, fileStatus, encryptedAesKeyForRecipient, s3Path, lastModified"),
+		FilterExpression:     aws.String("fileStatus = :pendingStat"),
+	}
+
+	result, err := db.Query(input)
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	type InboxFile struct {
+		OwnerEmail                  string `json:"ownerEmail"`
+		FileName                    string `json:"fileName"`
+		FileStatus                  string `json:"fileStatus"`
+		EncryptedAesKeyForRecipient string `json:"encryptedAesKeyForRecipient"`
+		S3Path                      string `json:"s3Path"`
+		LastModified                string `json:"lastModified"`
+	}
+
+	var inboxFiles []InboxFile
+
+	for _, item := range result.Items {
+		ownerEmailAttr, ok1 := item["ownerEmail"]
+		fileNameAttr, ok2 := item["fileName"]
+		fileStatusAttr, ok3 := item["fileStatus"]
+		encryptedAesKeyAttr, ok4 := item["encryptedAesKeyForRecipient"]
+		s3PathAttr, ok5 := item["s3Path"]
+		lastModifiedAttr, ok6 := item["lastModified"]
+
+		if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 &&
+			ownerEmailAttr.S != nil && fileNameAttr.S != nil &&
+			fileStatusAttr.S != nil && encryptedAesKeyAttr.S != nil &&
+			s3PathAttr.S != nil && lastModifiedAttr.S != nil {
+
+			inboxFiles = append(inboxFiles, InboxFile{
+				OwnerEmail:                  *ownerEmailAttr.S,
+				FileName:                    *fileNameAttr.S,
+				FileStatus:                  *fileStatusAttr.S,
+				EncryptedAesKeyForRecipient: *encryptedAesKeyAttr.S,
+				S3Path:                      *s3PathAttr.S,
+				LastModified:                *lastModifiedAttr.S,
+			})
+		}
+	}
+
+	c.JSON(200, gin.H{"inbox_files": inboxFiles})
+}
+
+func acceptInboxFiles(c *gin.Context) {
+
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	type AcceptedFiles struct {
+		Files []map[string]string `json:"files"`
+	}
+
+	var acceptedFiles AcceptedFiles
+
+	err := c.BindJSON(&acceptedFiles)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	for _, item := range acceptedFiles.Files {
+		// Changes all the statuses of a given set of files
+		input := &dynamodb.UpdateItemInput{
+			TableName: aws.String("shares_data"),
+			Key: map[string]*dynamodb.AttributeValue{
+				"recipientEmail": {S: aws.String(email.(string))},
+				"fileName":       {S: aws.String(item["fileName"])},
+			},
+			UpdateExpression: aws.String("set fileStatus = :val"),
+			ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+				":val": {S: aws.String("Accepted")},
+			},
+		}
+
+		_, err := db.UpdateItem(input)
+		if err != nil {
+			c.Status(500)
+			return
+		}
+	}
+
+	c.Status(200)
+}
+
+func deleteInboxFiles(c *gin.Context) {
+
+	email, exists := c.Get("email")
+
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	type FilesToDelete struct {
+		Files []string `json:"files"`
+	}
+
+	var files FilesToDelete
+
+	err := c.BindJSON(&files)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	remainder := len(files.Files) % 25
+	groups := (len(files.Files) / 25)
+
+	if remainder != 0 {
+		groups += 1
+	}
+
+	for i := 0; i < groups; i++ {
+		start := i * 25
+		end := start + 25
+
+		if end > len(files.Files) {
+			end = len(files.Files)
+		}
+
+		var keys []map[string]*dynamodb.AttributeValue
+		for _, fileName := range files.Files[start:end] {
+			keys = append(keys, map[string]*dynamodb.AttributeValue{
+				"recipientEmail": {S: aws.String(email.(string))},
+				"fileName":       {S: aws.String(fileName)},
+			})
+		}
+
+		writeRequests := make([]*dynamodb.WriteRequest, len(keys))
+		for i, key := range keys {
+			writeRequests[i] = &dynamodb.WriteRequest{
+				DeleteRequest: &dynamodb.DeleteRequest{
+					Key: key,
+				},
+			}
+		}
+
+		deleteInput := &dynamodb.BatchWriteItemInput{
+			RequestItems: map[string][]*dynamodb.WriteRequest{
+				"shares_data": writeRequests,
+			},
+		}
+
+		_, err = db.BatchWriteItem(deleteInput)
+		if err != nil {
+			c.Status(500)
+			return
+		}
+	}
+
+	c.Status(200)
+}
+
+func retrieveEncAESKeys(c *gin.Context) {
+	email, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	type filesReceived struct {
+		FileNames []string `json:"fileNames"`
+	}
+
+	var acceptedFiles filesReceived
+	if err := c.BindJSON(&acceptedFiles); err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	resultMap := make(map[string]map[string]string)
+
+	for _, fileName := range acceptedFiles.FileNames {
+		input := &dynamodb.GetItemInput{
+			TableName: aws.String("file_metadata"),
+			Key: map[string]*dynamodb.AttributeValue{
+				"email":            {S: aws.String(email.(string))},
+				"originalFileName": {S: aws.String(fileName)},
+			},
+			ProjectionExpression: aws.String("originalFileName, EncryptedAesKey, iv"),
+		}
+
+		result, err := db.GetItem(input)
+		if err != nil {
+			c.Status(500)
+			return
+		}
+
+		if result.Item != nil {
+			encKeyAttr, ok1 := result.Item["EncryptedAesKey"]
+			ivAttr, ok2 := result.Item["iv"]
+			if ok1 && ok2 && encKeyAttr.S != nil && ivAttr.S != nil {
+				resultMap[fileName] = map[string]string{
+					"encryptedAesKey": *encKeyAttr.S,
+					"iv":              *ivAttr.S,
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"files": resultMap})
 }
 
 func main() {
@@ -1231,8 +1649,9 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
-	router.POST("/sessions", loginUser)                                        // POST /sessions to create a session (login)
-	router.POST("/users", signupUser)                                          // POST /users to create a user (signup)
+	router.POST("/sessions", loginUser) // POST /sessions to create a session (login)
+	router.POST("/users", signupUser)   // POST /users to create a user (signup)
+	router.GET("/")
 	router.GET("/users", AuthMiddleware(), signOutUser)                        // GET /users to signout user, clearing cookie info + token from db (signout)
 	router.POST("/tokens", generateToken)                                      // POST /tokens to create a token
 	router.POST("/token-cookies", setTokenCookieHandler)                       // POST /token-cookies to set a token cookie
@@ -1244,5 +1663,12 @@ func main() {
 	router.POST("/users/files", AuthMiddleware(), fetchUserFile)               // POST /users/files gets one file given the s3path to it, returns as base64 string streamed
 	router.DELETE("/users/files", AuthMiddleware(), deleteUserFiles)           // DELETE /users/files takes a collection of filenames for a specific user and deletes them from metadata storage + s3
 	router.POST("/users/files/metadata", AuthMiddleware(), fetchFileMetadatas) // POST /users/files/metadata for grabbing metadata for a list of specified files for a user
+	router.POST("/users/exists", AuthMiddleware(), verifyUserExists)
+	router.POST("/users/public-keys", AuthMiddleware(), obtainPublicKeys)
+	router.POST("/users/files/share", AuthMiddleware(), shareFilesWithRecipients)
+	router.GET("/users/files/inbox", AuthMiddleware(), retrieveInboxFiles)
+	router.POST("/users/files/inbox", AuthMiddleware(), acceptInboxFiles)
+	router.DELETE("/users/files/inbox", AuthMiddleware(), deleteInboxFiles)
+	router.POST("/users/files/encrypted-keys", AuthMiddleware(), retrieveEncAESKeys)
 	router.Run("localhost:8080")
 }
