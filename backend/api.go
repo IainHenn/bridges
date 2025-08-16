@@ -871,7 +871,6 @@ func fetchUserFile(c *gin.Context) {
 	c.Status(200)
 	c.Writer.Write(decoded)
 }
-
 func fetchFileMetadatas(c *gin.Context) {
 	email, exists := c.Get("email")
 	if !exists {
@@ -879,26 +878,32 @@ func fetchFileMetadatas(c *gin.Context) {
 		return
 	}
 
+	type File struct {
+		FileName     string `json:"FileName"`
+		LastModified string `json:"LastModified"`
+		OwnedBy      string `json:"OwnedBy"`
+	}
+
 	type Files struct {
-		FileNameList []string `json:"selectedFiles"`
+		MatchedFiles []File `json:"matchedFiles"`
 	}
 
 	var filesReq Files
 
 	err := c.BindJSON(&filesReq)
-
 	if err != nil {
 		c.Status(400)
 		return
 	}
 
-	if len(filesReq.FileNameList) == 0 {
+	fmt.Println("filesReq: ", filesReq.MatchedFiles)
+
+	if len(filesReq.MatchedFiles) == 0 {
 		c.Status(400)
 		return
 	}
 
 	db, err := initDynamoDB()
-
 	if err != nil {
 		c.Status(500)
 		return
@@ -910,101 +915,78 @@ func fetchFileMetadatas(c *gin.Context) {
 		return
 	}
 
-	if len(filesReq.FileNameList) > 100 {
-		type fileDTO struct {
-			FileName        string
-			FileType        string
-			Iv              string
-			EncryptedAesKey string
-			S3Path          string
-			FileSize        int
+	type fileDTO struct {
+		FileName        string
+		FileType        string
+		Iv              string
+		EncryptedAesKey string
+		S3Path          string
+		FileSize        int
+	}
+
+	var files []fileDTO
+
+	batchSize := 100
+	total := len(filesReq.MatchedFiles)
+	for i := 0; i < total; i += batchSize {
+		end := i + batchSize
+		if end > total {
+			end = total
 		}
-
-		var files []fileDTO
-		remainder := len(filesReq.FileNameList) % 100
-		groups := (len(filesReq.FileNameList) / 100)
-
-		if remainder != 0 {
-			groups += 1
+		var keys []map[string]*dynamodb.AttributeValue
+		var sharesToFetch []struct {
+			RecipientEmail string
+			FileName       string
+			OwnerEmail     string
 		}
-
-		for i := 0; i < groups; i++ {
-			start := i * 100
-			end := start + 100
-
-			if end > len(filesReq.FileNameList) {
-				end = len(filesReq.FileNameList)
-			}
-			var keys []map[string]*dynamodb.AttributeValue
-			for _, fileName := range filesReq.FileNameList[start:end] {
+		for _, file := range filesReq.MatchedFiles[i:end] {
+			if file.OwnedBy == "Self" {
 				keys = append(keys, map[string]*dynamodb.AttributeValue{
 					"email":            {S: aws.String(emailStr)},
-					"originalFileName": {S: aws.String(fileName)},
+					"originalFileName": {S: aws.String(file.FileName)},
+				})
+			} else {
+				// For shared files, we need to fetch metadata from file_metadata and encrypted key from shares_data
+				keys = append(keys, map[string]*dynamodb.AttributeValue{
+					"email":            {S: aws.String(file.OwnedBy)},
+					"originalFileName": {S: aws.String(file.FileName)},
+				})
+				sharesToFetch = append(sharesToFetch, struct {
+					RecipientEmail string
+					FileName       string
+					OwnerEmail     string
+				}{
+					RecipientEmail: emailStr,
+					FileName:       file.FileName,
+					OwnerEmail:     file.OwnedBy,
 				})
 			}
-
-			input := &dynamodb.BatchGetItemInput{
-				RequestItems: map[string]*dynamodb.KeysAndAttributes{
-					"file_metadata": {
-						Keys:                 keys,
-						ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv, fileSize"),
-					},
-				},
-			}
-
-			result, err := db.BatchGetItem(input)
-			if err != nil {
-				c.Status(500)
-				return
-			}
-
-			for _, items := range result.Responses {
-				for _, item := range items {
-					fileNameAttr, ok1 := item["originalFileName"]
-					s3PathAttr, ok2 := item["s3Path"]
-					fileTypeAttr, ok3 := item["FileType"]
-					ivAttr, ok4 := item["iv"]
-					fileSizeAttr, ok5 := item["fileSize"]
-					encryptedAesKeyAttr, ok6 := item["EncryptedAesKey"]
-					if ok1 && fileNameAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil && ok2 && s3PathAttr.S != nil {
-
-						size, err := strconv.Atoi(*fileSizeAttr.N)
-						if err != nil {
-							c.Status(500)
-							return
-						}
-
-						fileObj := fileDTO{
-							FileName:        *fileNameAttr.S,
-							FileType:        *fileTypeAttr.S,
-							Iv:              *ivAttr.S,
-							S3Path:          *s3PathAttr.S,
-							EncryptedAesKey: *encryptedAesKeyAttr.S,
-							FileSize:        size,
-						}
-						files = append(files, fileObj)
-					}
-				}
-			}
-		}
-
-		c.IndentedJSON(200, gin.H{"files": files})
-	} else {
-		var keys []map[string]*dynamodb.AttributeValue
-		for _, fileName := range filesReq.FileNameList {
-			keys = append(keys, map[string]*dynamodb.AttributeValue{
-				"email":            {S: aws.String(emailStr)},
-				"originalFileName": {S: aws.String(fileName)},
-			})
 		}
 
 		input := &dynamodb.BatchGetItemInput{
 			RequestItems: map[string]*dynamodb.KeysAndAttributes{
 				"file_metadata": {
 					Keys:                 keys,
-					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, iv, EncryptedAesKey, fileSize"),
+					ProjectionExpression: aws.String("originalFileName, s3Path, FileType, EncryptedAesKey, iv, fileSize"),
 				},
 			},
+		}
+
+		// If there are shared files, fetch their encrypted keys from shares_data
+		sharedKeys := make(map[string]string)
+		for _, share := range sharesToFetch {
+			shareInput := &dynamodb.GetItemInput{
+				TableName: aws.String("shares_data"),
+				Key: map[string]*dynamodb.AttributeValue{
+					"recipientEmail": {S: aws.String(share.RecipientEmail)},
+					"fileName":       {S: aws.String(share.FileName)},
+				},
+				ProjectionExpression: aws.String("encryptedAesKeyForRecipient"),
+			}
+			shareResult, err := db.GetItem(shareInput)
+			if err == nil && shareResult.Item != nil && shareResult.Item["encryptedAesKeyForRecipient"] != nil {
+				sharedKeys[share.FileName] = *shareResult.Item["encryptedAesKeyForRecipient"].S
+			}
 		}
 
 		result, err := db.BatchGetItem(input)
@@ -1012,17 +994,6 @@ func fetchFileMetadatas(c *gin.Context) {
 			c.Status(500)
 			return
 		}
-
-		type fileDTO struct {
-			FileName        string
-			FileType        string
-			Iv              string
-			EncryptedAesKey string
-			S3Path          string
-			FileSize        int
-		}
-
-		var files []fileDTO
 
 		for _, items := range result.Responses {
 			for _, item := range items {
@@ -1032,11 +1003,18 @@ func fetchFileMetadatas(c *gin.Context) {
 				ivAttr, ok4 := item["iv"]
 				encryptedAesKeyAttr, ok5 := item["EncryptedAesKey"]
 				fileSizeAttr, ok6 := item["fileSize"]
-				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil && ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil && ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
+				if ok1 && fileNameAttr.S != nil && ok2 && s3PathAttr.S != nil &&
+					ok3 && fileTypeAttr.S != nil && ok4 && ivAttr.S != nil &&
+					ok5 && encryptedAesKeyAttr.S != nil && ok6 && fileSizeAttr.N != nil {
 					size, err := strconv.Atoi(*fileSizeAttr.N)
 					if err != nil {
 						c.Status(500)
 						return
+					}
+
+					encryptedAesKey := *encryptedAesKeyAttr.S
+					if sharedKey, found := sharedKeys[*fileNameAttr.S]; found {
+						encryptedAesKey = sharedKey
 					}
 
 					fileObj := fileDTO{
@@ -1044,15 +1022,15 @@ func fetchFileMetadatas(c *gin.Context) {
 						FileType:        *fileTypeAttr.S,
 						Iv:              *ivAttr.S,
 						S3Path:          *s3PathAttr.S,
-						EncryptedAesKey: *encryptedAesKeyAttr.S,
+						EncryptedAesKey: encryptedAesKey,
 						FileSize:        size,
 					}
 					files = append(files, fileObj)
 				}
 			}
 		}
-		c.IndentedJSON(200, gin.H{"files": files})
 	}
+	c.IndentedJSON(200, gin.H{"files": files})
 }
 
 func deleteUserFiles(c *gin.Context) {

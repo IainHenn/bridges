@@ -122,6 +122,11 @@ const downloadFiles = async () => {
     setIsDownloading(true);
     setDownloadProgress(0);
 
+    let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
+
+    console.log("matchedFiles: ", matchedFiles);
+
+
     // Fetch file metadata for selected files
     const metadataResp = await fetch("http://localhost:8080/users/files/metadata", {
         method: "POST",
@@ -129,7 +134,7 @@ const downloadFiles = async () => {
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ selectedFiles })
+        body: JSON.stringify({ matchedFiles })
     });
 
     const metadataData = await metadataResp.json();
@@ -137,6 +142,8 @@ const downloadFiles = async () => {
         alert("Failed to fetch file metadata.");
         return;
     }
+
+    console.log("metadataData: ", metadataData);
 
     let zip = new JSZip();
     let foldersToZip: Record<string, any[]> = {};
