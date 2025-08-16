@@ -1613,6 +1613,62 @@ func deleteInboxFiles(c *gin.Context) {
 	c.Status(200)
 }
 
+func retrieveEncAESKeys(c *gin.Context) {
+	email, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	type filesReceived struct {
+		FileNames []string `json:"fileNames"`
+	}
+
+	var acceptedFiles filesReceived
+	if err := c.BindJSON(&acceptedFiles); err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	resultMap := make(map[string]map[string]string)
+
+	for _, fileName := range acceptedFiles.FileNames {
+		input := &dynamodb.GetItemInput{
+			TableName: aws.String("file_metadata"),
+			Key: map[string]*dynamodb.AttributeValue{
+				"email":            {S: aws.String(email.(string))},
+				"originalFileName": {S: aws.String(fileName)},
+			},
+			ProjectionExpression: aws.String("originalFileName, EncryptedAesKey, iv"),
+		}
+
+		result, err := db.GetItem(input)
+		if err != nil {
+			c.Status(500)
+			return
+		}
+
+		if result.Item != nil {
+			encKeyAttr, ok1 := result.Item["EncryptedAesKey"]
+			ivAttr, ok2 := result.Item["iv"]
+			if ok1 && ok2 && encKeyAttr.S != nil && ivAttr.S != nil {
+				resultMap[fileName] = map[string]string{
+					"encryptedAesKey": *encKeyAttr.S,
+					"iv":              *ivAttr.S,
+				}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"files": resultMap})
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -1643,5 +1699,6 @@ func main() {
 	router.GET("/users/files/inbox", AuthMiddleware(), retrieveInboxFiles)
 	router.POST("/users/files/inbox", AuthMiddleware(), acceptInboxFiles)
 	router.DELETE("/users/files/inbox", AuthMiddleware(), deleteInboxFiles)
+	router.POST("/users/files/encrypted-keys", AuthMiddleware(), retrieveEncAESKeys)
 	router.Run("localhost:8080")
 }

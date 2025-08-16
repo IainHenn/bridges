@@ -520,13 +520,14 @@ const deleteFiles = () => {
                     open={showShareFilesModal}
                     onClose={() => setShowShareFilesModal(false)}
                     onShare={(emails: string[]) => {
+                        let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
                         fetch("http://localhost:8080/users/files/metadata", {
                             method: 'POST',
                             credentials: 'include',
                             headers: {
                                 "Content-Type": "application/json"
                             },
-                            body: JSON.stringify({ selectedFiles })
+                            body: JSON.stringify({ matchedFiles })
                         })
                         .then(resp => {
                             if (resp.status != 200) {
@@ -742,47 +743,48 @@ const deleteFiles = () => {
                             {...getRootProps({
                                 onDrop: undefined, // disable Dropzone's default onDrop
                                 onDragOver: (e: React.DragEvent) => e.preventDefault(),
-                                onDrop: (event: React.DragEvent) => {
+                                onDrop: async (event: React.DragEvent) => {
                                     event.preventDefault();
                                     const items = event.dataTransfer.items;
                                     const droppedFiles: string[] = [];
                                     let pending = 0;
                                     const fileMetadatas: FileMetadata[] = [];
 
+                                    // Helper functions
+                                    function base64ToArrayBuffer(base64: string): ArrayBuffer {
+                                        const binaryString = window.atob(base64);
+                                        const len = binaryString.length;
+                                        const bytes = new Uint8Array(len);
+                                        for (let i = 0; i < len; i++) {
+                                            bytes[i] = binaryString.charCodeAt(i);
+                                        }
+                                        return bytes.buffer;
+                                    }
+                                    function arrayBufferToBase64(buffer: ArrayBuffer) {
+                                        const bytes = new Uint8Array(buffer);
+                                        let binary = "";
+                                        for (let i = 0; i < bytes.byteLength; i++) {
+                                            binary += String.fromCharCode(bytes[i]);
+                                        }
+                                        return window.btoa(binary);
+                                    }
+
+                                    // Collect all file names for backend request
+                                    const allFileNames: string[] = [];
+
                                     function traverseFileTree(item: any, path = "") {
                                         let uploadStarted = false;
                                         if (item.isFile) {
                                             pending++;
                                             item.file(async (file: File) => {
+                                                const fullPath = path + file.name;
+                                                allFileNames.push(fullPath);
                                                 let file_metadata = {
                                                     ...file,
-                                                    fullPath: path + file.name,
+                                                    fullPath,
                                                     uploadDate: new Date(),
                                                 };
-                                                droppedFiles.push(path + file.name);
 
-                                                function base64ToArrayBuffer(base64: string): ArrayBuffer {
-                                                    const binaryString = window.atob(base64);
-                                                    const len = binaryString.length;
-                                                    const bytes = new Uint8Array(len);
-                                                    for (let i = 0; i < len; i++) {
-                                                        bytes[i] = binaryString.charCodeAt(i);
-                                                    }
-                                                    return bytes.buffer;
-                                                }
-
-                                                function arrayBufferToBase64(buffer: ArrayBuffer) {
-                                                    const bytes = new Uint8Array(buffer);
-                                                    let binary = "";
-                                                    for (let i = 0; i < bytes.byteLength; i++) {
-                                                        binary += String.fromCharCode(bytes[i]);
-                                                    }
-                                                    return window.btoa(binary);
-                                                }
-
-                                                const ivBytes = window.crypto.getRandomValues(
-                                                    new Uint8Array(12)
-                                                );
                                                 const fileBlob = new Blob([file]);
                                                 const fileType = file.type;
 
@@ -815,43 +817,136 @@ const deleteFiles = () => {
                                                     ["encrypt"]
                                                 );
 
-                                                // Generate a new AES key for this file
-                                                const aesKey = await window.crypto.subtle.generateKey(
-                                                    {
-                                                        name: "AES-GCM",
-                                                        length: 256,
-                                                    },
-                                                    true,
-                                                    ["encrypt", "decrypt"]
-                                                );
+                                                // Request encrypted AES keys for all uploaded file names
+                                                let aesKeysData: Record<string, { encryptedAesKey: string, iv: string }> = {};
+                                                try {
+                                                    const aesKeysResp = await fetch(
+                                                        "http://localhost:8080/users/files/encrypted-keys",
+                                                        {
+                                                            method: "POST",
+                                                            credentials: "include",
+                                                            headers: {
+                                                                "Content-Type": "application/json",
+                                                            },
+                                                            body: JSON.stringify({
+                                                                fileNames: [fullPath],
+                                                            }),
+                                                        }
+                                                    );
+                                                    if (aesKeysResp.ok) {
+                                                        aesKeysData = await aesKeysResp.json();
+                                                    }
+                                                } catch (error) {
+                                                    console.error(
+                                                        "Error fetching /users/files/encrypted-keys:",
+                                                        error
+                                                    );
+                                                }
 
-                                                // Encrypt the file with the AES key
-                                                const encryptedData = await window.crypto.subtle.encrypt(
-                                                    {
-                                                        name: "AES-GCM",
-                                                        iv: ivBytes,
-                                                    },
-                                                    aesKey,
-                                                    await fileBlob.arrayBuffer()
-                                                );
+                                                let iv: string;
+                                                let encryptedAesKey: string;
+                                                let encryptedFile: string;
 
-                                                // Export and encrypt the AES key with the user's public RSA key
-                                                const rawAesKey = await window.crypto.subtle.exportKey(
-                                                    "raw",
-                                                    aesKey
-                                                );
-                                                const encryptedAesKeyBuffer =
-                                                    await window.crypto.subtle.encrypt(
-                                                        { name: "RSA-OAEP" },
-                                                        publicKey,
-                                                        rawAesKey
+                                                console.log("aesKeysData: ", aesKeysData);
+
+                                                if (
+                                                    aesKeysData &&
+                                                    aesKeysData[fullPath] &&
+                                                    aesKeysData[fullPath].encryptedAesKey &&
+                                                    aesKeysData[fullPath].iv
+                                                ) {
+                                                    // Use backend-provided AES key and IV
+                                                    iv = aesKeysData[fullPath].iv;
+                                                    encryptedAesKey = aesKeysData[fullPath].encryptedAesKey;
+
+                                                    // Decrypt AES key with user's private key
+                                                    let aesKeyRaw: ArrayBuffer;
+                                                    try {
+                                                        const privateKey = await window.crypto.subtle.importKey(
+                                                            "pkcs8",
+                                                            base64ToArrayBuffer(privateKeyEncDec),
+                                                            {
+                                                                name: "RSA-OAEP",
+                                                                hash: "SHA-256"
+                                                            },
+                                                            false,
+                                                            ["decrypt"]
+                                                        );
+                                                        aesKeyRaw = await window.crypto.subtle.decrypt(
+                                                            { name: "RSA-OAEP" },
+                                                            privateKey,
+                                                            base64ToArrayBuffer(encryptedAesKey)
+                                                        );
+                                                    } catch (error) {
+                                                        console.error("Failed to decrypt AES key from backend:", error);
+                                                        pending--;
+                                                        return;
+                                                    }
+
+                                                    // Import decrypted AES key
+                                                    const aesKey = await window.crypto.subtle.importKey(
+                                                        "raw",
+                                                        aesKeyRaw,
+                                                        { name: "AES-GCM" },
+                                                        false,
+                                                        ["encrypt", "decrypt"]
                                                     );
 
-                                                const iv = arrayBufferToBase64(ivBytes.buffer);
-                                                const encryptedAesKey =
-                                                    arrayBufferToBase64(encryptedAesKeyBuffer);
-                                                const encryptedFile =
-                                                    arrayBufferToBase64(encryptedData);
+                                                    // Encrypt the file with the AES key and backend-provided IV
+                                                    const encryptedData = await window.crypto.subtle.encrypt(
+                                                        {
+                                                            name: "AES-GCM",
+                                                            iv: base64ToArrayBuffer(iv),
+                                                        },
+                                                        aesKey,
+                                                        await fileBlob.arrayBuffer()
+                                                    );
+                                                    encryptedFile = arrayBufferToBase64(encryptedData);
+
+                                                } else {
+                                                    // Generate a new AES key for this file
+                                                    const aesKey = await window.crypto.subtle.generateKey(
+                                                        {
+                                                            name: "AES-GCM",
+                                                            length: 256,
+                                                        },
+                                                        true,
+                                                        ["encrypt", "decrypt"]
+                                                    );
+
+                                                    // Generate IV
+                                                    const ivBytes = window.crypto.getRandomValues(
+                                                        new Uint8Array(12)
+                                                    );
+
+                                                    // Encrypt the file with the AES key
+                                                    const encryptedData = await window.crypto.subtle.encrypt(
+                                                        {
+                                                            name: "AES-GCM",
+                                                            iv: ivBytes,
+                                                        },
+                                                        aesKey,
+                                                        await fileBlob.arrayBuffer()
+                                                    );
+
+                                                    // Export and encrypt the AES key with the user's public RSA key
+                                                    const rawAesKey = await window.crypto.subtle.exportKey(
+                                                        "raw",
+                                                        aesKey
+                                                    );
+                                                    const encryptedAesKeyBuffer =
+                                                        await window.crypto.subtle.encrypt(
+                                                            { name: "RSA-OAEP" },
+                                                            publicKey,
+                                                            rawAesKey
+                                                        );
+
+                                                    iv = arrayBufferToBase64(ivBytes.buffer);
+                                                    encryptedAesKey =
+                                                        arrayBufferToBase64(encryptedAesKeyBuffer);
+                                                    encryptedFile =
+                                                        arrayBufferToBase64(encryptedData);
+                                                }
 
                                                 file_metadata = {
                                                     ...file_metadata,
@@ -867,7 +962,7 @@ const deleteFiles = () => {
 
                                                 if (!uploadStarted && pending === 0) {
                                                     uploadStarted = true;
-                                                    console.dir(fileMetadatas);
+                                                    // Upload files
                                                     try {
                                                         const response = await fetch(
                                                             "http://localhost:8080/users/upload",
