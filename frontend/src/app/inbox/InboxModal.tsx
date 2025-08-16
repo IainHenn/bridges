@@ -19,7 +19,6 @@ export default function InboxModal() {
             .then(resp => {
                 if (resp.ok) {
                     resp.json().then(data => {
-                        console.log(data);
                         setFiles(data.inbox_files || []);
                         setLoading(false);
                     });
@@ -148,7 +147,6 @@ export default function InboxModal() {
                                                         setNotif("Failed to accept file");
                                                     }
                                                 })
-                                                console.log("Accepted:", file.fileName);
                                             }}
                                         >
                                             Accept
@@ -173,7 +171,6 @@ export default function InboxModal() {
                                                         setNotif("Failed to delete file");
                                                     }
                                                 })
-                                                console.log("Declined:", file.fileName);
                                             }}
                                         >
                                             Decline

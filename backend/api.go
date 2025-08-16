@@ -785,7 +785,6 @@ func obtainUserFileNames(c *gin.Context) {
 
 	result2, err := db.Query(input2)
 	if err != nil {
-		fmt.Println(err)
 		c.Status(500)
 		return
 	}
@@ -804,7 +803,6 @@ func obtainUserFileNames(c *gin.Context) {
 		}
 	}
 
-	fmt.Println(files)
 	c.IndentedJSON(200, gin.H{"files": files})
 }
 
@@ -895,8 +893,6 @@ func fetchFileMetadatas(c *gin.Context) {
 		c.Status(400)
 		return
 	}
-
-	fmt.Println("filesReq: ", filesReq.MatchedFiles)
 
 	if len(filesReq.MatchedFiles) == 0 {
 		c.Status(400)
@@ -1054,8 +1050,6 @@ func deleteUserFiles(c *gin.Context) {
 
 	err := c.BindJSON(&filesReq)
 
-	fmt.Println("Files to delete: ", filesReq)
-
 	if err != nil {
 		c.Status(400)
 		return
@@ -1097,7 +1091,6 @@ func deleteUserFiles(c *gin.Context) {
 	remainder := len(filesReq.MatchedFiles) % 25
 	groups := (len(filesReq.MatchedFiles) / 25)
 
-	fmt.Println("right before batch delete")
 	if remainder != 0 {
 		groups += 1
 	}
@@ -1176,7 +1169,6 @@ func deleteUserFiles(c *gin.Context) {
 
 					_, err := s3Client.DeleteObject(input)
 					if err != nil {
-						fmt.Println(err)
 						c.Status(500)
 						return
 					}
@@ -1197,7 +1189,6 @@ func deleteUserFiles(c *gin.Context) {
 
 		resultShared, err := db.BatchGetItem(inputShared)
 		if err != nil {
-			fmt.Println(err)
 			c.Status(500)
 			return
 		}
@@ -1219,7 +1210,6 @@ func deleteUserFiles(c *gin.Context) {
 
 		_, err = db.BatchWriteItem(deleteInputShared)
 		if err != nil {
-			fmt.Println(err)
 			c.Status(500)
 			return
 		}
@@ -1238,7 +1228,6 @@ func deleteUserFiles(c *gin.Context) {
 }
 
 func verifyUserExists(c *gin.Context) {
-	fmt.Println("are we inside")
 	db, err := getDBAccess()
 
 	if err != nil {
@@ -1329,25 +1318,18 @@ func shareFilesWithRecipients(c *gin.Context) {
 
 	err := c.BindJSON(&sharedInfo)
 
-	fmt.Println(sharedInfo)
-
 	if err != nil {
-		fmt.Println(err)
 		c.Status(400)
 		return
 	}
 
 	db, err := initDynamoDB()
 	if err != nil {
-		fmt.Println(err)
 		c.Status(500)
 		return
 	}
 
 	for email, data := range sharedInfo.Emails {
-		fmt.Println("email")
-		fmt.Println(email)
-		fmt.Println(data)
 		for i := 0; i < len(data); i++ {
 			input := &dynamodb.GetItemInput{
 				TableName: aws.String("shares_data"),
@@ -1360,7 +1342,6 @@ func shareFilesWithRecipients(c *gin.Context) {
 
 			result, err := db.GetItem(input)
 			if err != nil {
-				fmt.Println(err)
 				c.Status(500)
 				return
 			}
@@ -1395,7 +1376,6 @@ func shareFilesWithRecipients(c *gin.Context) {
 
 				_, err = db.PutItem(input)
 				if err != nil {
-					fmt.Println(err)
 					c.Status(500)
 					return
 				}
@@ -1415,7 +1395,6 @@ func retrieveInboxFiles(c *gin.Context) {
 
 	db, err := initDynamoDB()
 	if err != nil {
-		fmt.Println(err)
 		c.Status(500)
 		return
 	}
@@ -1434,7 +1413,6 @@ func retrieveInboxFiles(c *gin.Context) {
 
 	result, err := db.Query(input)
 	if err != nil {
-		fmt.Println(err)
 		c.Status(500)
 		return
 	}
@@ -1450,7 +1428,6 @@ func retrieveInboxFiles(c *gin.Context) {
 
 	var inboxFiles []InboxFile
 
-	fmt.Println("result.Items, ", result.Items)
 	for _, item := range result.Items {
 		ownerEmailAttr, ok1 := item["ownerEmail"]
 		fileNameAttr, ok2 := item["fileName"]
@@ -1475,7 +1452,6 @@ func retrieveInboxFiles(c *gin.Context) {
 		}
 	}
 
-	fmt.Println(inboxFiles)
 	c.JSON(200, gin.H{"inbox_files": inboxFiles})
 }
 
@@ -1497,15 +1473,12 @@ func acceptInboxFiles(c *gin.Context) {
 	err := c.BindJSON(&acceptedFiles)
 
 	if err != nil {
-		fmt.Println(err)
 		c.Status(400)
 		return
 	}
 
 	db, err := initDynamoDB()
 	if err != nil {
-		fmt.Println("here")
-		fmt.Println(err)
 		c.Status(500)
 		return
 	}
@@ -1526,7 +1499,6 @@ func acceptInboxFiles(c *gin.Context) {
 
 		_, err := db.UpdateItem(input)
 		if err != nil {
-			fmt.Println(err)
 			c.Status(500)
 			return
 		}
@@ -1553,14 +1525,12 @@ func deleteInboxFiles(c *gin.Context) {
 	err := c.BindJSON(&files)
 
 	if err != nil {
-		fmt.Println(err)
 		c.Status(400)
 		return
 	}
 
 	db, err := initDynamoDB()
 	if err != nil {
-		fmt.Println(err)
 		c.Status(500)
 		return
 	}

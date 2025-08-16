@@ -124,9 +124,6 @@ const downloadFiles = async () => {
 
     let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
 
-    console.log("matchedFiles: ", matchedFiles);
-
-
     // Fetch file metadata for selected files
     const metadataResp = await fetch("http://localhost:8080/users/files/metadata", {
         method: "POST",
@@ -142,8 +139,6 @@ const downloadFiles = async () => {
         alert("Failed to fetch file metadata.");
         return;
     }
-
-    console.log("metadataData: ", metadataData);
 
     let zip = new JSZip();
     let foldersToZip: Record<string, any[]> = {};
@@ -531,12 +526,11 @@ const deleteFiles = () => {
                         })
                         .then(resp => {
                             if (resp.status != 200) {
-                                console.log("failure");
+                                alert("Failed to share files, try again later.");
                                 return
                             } else {
                                 (async () => {
                                     const dataObj = await resp.json();
-                                    console.log("Shared files response:", dataObj);
                                     let sharedInfo: { [email: string]: any[] } = {};
                                     let decryptedAesKeys: any = {};
 
@@ -550,7 +544,7 @@ const deleteFiles = () => {
                                         body: JSON.stringify({emails})
                                     });
                                     if (!pubKeysResp.ok) {
-                                        console.log("inner failure");
+                                        alert("Failed to share files, try again later.");
                                         return;
                                     }
                                     const pubKeysData = await pubKeysResp.json();
@@ -631,7 +625,6 @@ const deleteFiles = () => {
                                             }
                                         }
                                     }
-                                    console.log("Shared info: ", sharedInfo);
                                     fetch("http://localhost:8080/users/files/share", {
                                         method: 'POST',
                                         credentials: 'include',
@@ -639,25 +632,9 @@ const deleteFiles = () => {
                                             'Content-Type': 'application/json'
                                         },
                                         body: JSON.stringify({sharedInfo})
-                                    })
-                                    .then(resp => {
-                                        if(resp.ok){
-                                            console.log("Nice");
-                                            /*resp.json().then(data => {
-                                                // handle data if needed
-                                                console.log(data);
-                                            });*/
-                                        }
-                                        else {
-                                            console.log("failed");
-                                        }
-                                    })
-                                    console.log("success");
+                                    });
                                 })();
                             }
-                        })
-                        .then(data => {
-                            console.log(data);
                         })
                         setShowShareFilesModal(false);
                     }}
@@ -846,8 +823,6 @@ const deleteFiles = () => {
                                                 let iv: string;
                                                 let encryptedAesKey: string;
                                                 let encryptedFile: string;
-
-                                                console.log("aesKeysData: ", aesKeysData);
 
                                                 if (
                                                     aesKeysData &&
