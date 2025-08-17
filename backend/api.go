@@ -1385,6 +1385,45 @@ func shareFilesWithRecipients(c *gin.Context) {
 	c.Status(200)
 }
 
+func unshareFilesWithRecipient(c *gin.Context) {
+
+	type SharedInfoToDelete struct {
+		Email    string `json:"recipientEmail"`
+		FileName string `json:"fileName"`
+	}
+
+	var sharedInfo SharedInfoToDelete
+
+	err := c.BindJSON(&sharedInfo)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String("shares_data"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"recipientEmail": {S: aws.String(sharedInfo.Email)},
+			"fileName":       {S: aws.String(sharedInfo.FileName)},
+		},
+	}
+
+	_, err = db.DeleteItem(input)
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	c.Status(200)
+}
+
 func retrieveInboxFiles(c *gin.Context) {
 	email, exists := c.Get("email")
 
