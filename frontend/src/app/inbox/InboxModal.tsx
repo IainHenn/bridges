@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function InboxModal() {
     const [files, setFiles] = useState<any[]>([]);
@@ -6,6 +7,7 @@ export default function InboxModal() {
     const [loading, setLoading] = useState<boolean>(false);
     const [notif, setNotif] = useState<string | null>(null);
     const [notifProgress, setNotifProgress] = useState(0);
+    const router = useRouter();
 
     useEffect(() => {
         setLoading(true);
@@ -61,7 +63,8 @@ export default function InboxModal() {
 
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 font-mono">
+        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 font-mono"
+        onClick={() => {router.push("/files")}}>
             <div className="bg-black border-2 border-white p-8 shadow-none min-w-[600px]" style={{ borderRadius: 0 }}>
                 {loading ? (
                     <div className="text-green-400 font-mono text-lg mb-4">Loading...</div>
