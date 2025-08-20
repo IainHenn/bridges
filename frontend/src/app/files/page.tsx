@@ -97,6 +97,21 @@ export default function files() {
     }
   }, [selectedFiles])
 
+  function checkUserPerms() {
+        let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
+        let errorRaised = false;
+        matchedFiles.forEach(file => {
+            if(file.OwnedBy != "Self"){
+                errorRaised = true;
+                alert("User cannot share files that they do not own!");
+                return;
+            }
+        });
+
+        if(errorRaised == false){
+            setShowShareFilesModal(true)
+        }
+  }
 
   function signOut() {
     fetch("http://localhost:8080/users", {
@@ -513,7 +528,7 @@ const deleteFiles = () => {
 
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
-                onClick={() => {setShowShareFilesModal(true)}}
+                onClick={checkUserPerms}
                 style={{ letterSpacing: "2px" }}
             >
                 Share Selected Files
