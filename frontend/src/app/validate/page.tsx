@@ -169,63 +169,68 @@ export default function Validation() {
   }
 
   async function submitInfo() {
-    const {salt, nonce, encryptedKey } = JSON.parse(fileText);
-    const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
-    setPrivateKey(returnedKey);
+    try {
+      const {salt, nonce, encryptedKey } = JSON.parse(fileText);
+      const returnedKey = await decryptPrivateKey(encryptedKey,validationPhrase,salt,nonce);
+      setPrivateKey(returnedKey);
 
-    const response = await fetch("/api/challenge", {
-      method: "GET",
-      headers: {
-      "Content-Type": "application/json"
-      },
-      credentials: "include"
-    });
-
-    const data = await response.json();
-
-    let randomNonce = null;
-
-    if(response.ok){
-      randomNonce = data.nonce;
-      const challengeBytes = base64ToArrayBuffer(randomNonce);
-      const signature = await crypto.subtle.sign(
-        {
-          name: "ECDSA",
-          hash: { name: "SHA-256" }
-        },
-        await window.crypto.subtle.importKey(
-          "pkcs8",
-          base64ToArrayBuffer(returnedKey),
-          {
-            name: "ECDSA",
-            namedCurve: "P-256"
-          },
-          false,
-          ["sign"]
-        ),
-        challengeBytes
-      );
-
-
-      const verifyResponse = await fetch("http://localhost:8080/signatures/verify", { 
-        method: "POST",
+      const response = await fetch("/api/challenge", {
+        method: "GET",
         headers: {
-          "Content-Type": "application/json"
+        "Content-Type": "application/json"
         },
-        credentials: "include",
-        body: JSON.stringify({
-          signature: Buffer.from(rawSigToASN1(signature)).toString('base64'),
-          challenge: randomNonce
-        })
+        credentials: "include"
       });
 
-      const verifyData = await verifyResponse.json();
-      if (verifyResponse.ok && verifyData.success) {
-        router.push("/files");
+      const data = await response.json();
+
+      let randomNonce = null;
+
+      if(response.ok){
+        randomNonce = data.nonce;
+        const challengeBytes = base64ToArrayBuffer(randomNonce);
+        const signature = await crypto.subtle.sign(
+          {
+            name: "ECDSA",
+            hash: { name: "SHA-256" }
+          },
+          await window.crypto.subtle.importKey(
+            "pkcs8",
+            base64ToArrayBuffer(returnedKey),
+            {
+              name: "ECDSA",
+              namedCurve: "P-256"
+            },
+            false,
+            ["sign"]
+          ),
+          challengeBytes
+        );
+
+
+        const verifyResponse = await fetch("http://localhost:8080/signatures/verify", { 
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            signature: Buffer.from(rawSigToASN1(signature)).toString('base64'),
+            challenge: randomNonce
+          })
+        });
+
+        const verifyData = await verifyResponse.json();
+        if (verifyResponse.ok && verifyData.success) {
+          router.push("/files");
+        }
+        else{
+          console.log(verifyResponse.error);
+        }
       }
-      else{
-        console.log(verifyResponse.error);
-      }
+    }
+    catch {
+      alert("Verification failed!");
     }
   }
   
