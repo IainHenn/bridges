@@ -6,6 +6,7 @@ import Dropzone from 'react-dropzone'
 import JSZip from "jszip";
 import ShareFilesModal from "./ShareFilesModal";
 import InboxModal from "../inbox/InboxModal";
+import UnshareFilesModal from "./UnshareFilesModal";
 import { AnyARecord } from "dns";
 
 
@@ -13,7 +14,7 @@ import { AnyARecord } from "dns";
 export default function files() {
 
   const [showShareFilesModal, setShowShareFilesModal] = useState(false);
-
+  const [showUnshareFilesModal, setShowUnshareFilesModal] = useState(false);
   type FilePreview = {
     FileName: string
     LastModified: string
@@ -34,6 +35,7 @@ export default function files() {
   const [isDownloading, setIsDownloading] = useState(false);
   const [loading, setLoading] = useState(true); // loading state
   const [loadingDots, setLoadingDots] = useState(0);
+  const [showUnshareButton, setShowUnshareButton] = useState(false);
 
   type FileMetadata = {
     fullPath: string;
@@ -80,6 +82,36 @@ export default function files() {
     return () => clearTimeout(timeout);
   }, [privateKeyStatus, privateKeyStatusAnimIdx]);
 
+  useEffect(() => {
+    if (selectedFiles.length == 1) {
+        let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
+        if (matchedFiles[0].OwnedBy == "Self") {
+            setShowUnshareButton(true);
+        }
+        else{
+            setShowUnshareButton(false);
+        }
+    }
+    else{
+        setShowUnshareButton(false);
+    }
+  }, [selectedFiles])
+
+  function checkUserPerms() {
+        let matchedFiles = files.filter(file => selectedFiles.includes(file.FileName));
+        let errorRaised = false;
+        matchedFiles.forEach(file => {
+            if(file.OwnedBy != "Self"){
+                errorRaised = true;
+                alert("User cannot share files that they do not own!");
+                return;
+            }
+        });
+
+        if(errorRaised == false){
+            setShowShareFilesModal(true)
+        }
+  }
 
   function signOut() {
     fetch("http://localhost:8080/users", {
@@ -496,11 +528,21 @@ const deleteFiles = () => {
 
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
-                onClick={() => {setShowShareFilesModal(true)}}
+                onClick={checkUserPerms}
                 style={{ letterSpacing: "2px" }}
             >
                 Share Selected Files
             </button>
+
+            {showUnshareButton && (
+                <button
+                    className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
+                    onClick={() => setShowUnshareFilesModal(true)}
+                    style={{ letterSpacing: "2px" }}
+                >
+                    Unshare Selected File
+                </button>
+            )}
 
             <button
                 className="px-12 py-6 text-2xl bg-black border-2 border-white text-white font-mono rounded-none shadow-none cursor-pointer w-full hover:bg-white hover:text-black transition-colors"
@@ -509,6 +551,14 @@ const deleteFiles = () => {
             >
                 Inbox
             </button>
+
+            {showUnshareFilesModal &&
+                <UnshareFilesModal 
+                filename={selectedFiles[0]}
+                open={showUnshareFilesModal}
+                onClose={() => {setShowUnshareFilesModal(false)}}
+                />
+            }
 
             {showShareFilesModal &&
                 <ShareFilesModal

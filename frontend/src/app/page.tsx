@@ -12,7 +12,8 @@ export default function Home() {
 
   const signIn = async (event: React.FormEvent) => {
     event.preventDefault();
-    const form = event.target as HTMLFormElement;
+    try {
+      const form = event.target as HTMLFormElement;
     setEmail(form.email.value);
     setPassword(form.password.value);
     event.preventDefault();
@@ -36,16 +37,22 @@ export default function Home() {
               body: JSON.stringify({ token: tokenData.token })
             });
           } else {
+            alert("Failed to login!");
             console.log("failed to generate user token");
           }
           router.push('/validate');
         } else {
+          alert("Failed to login!");
           console.log(`Failed to login user: ${response.status}`)
         }
       })
       .catch(error => {
         console.error("Error:", error);
       });
+    }
+    catch {
+      alert("Failed to login!");
+    }
   }
   const signUp = () => {
     router.push('/signup');

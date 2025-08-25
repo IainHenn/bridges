@@ -1130,7 +1130,6 @@ func deleteUserFiles(c *gin.Context) {
 
 		result, err := db.BatchGetItem(input)
 		if err != nil {
-			print(err)
 			c.Status(500)
 			return
 		}
@@ -1152,7 +1151,6 @@ func deleteUserFiles(c *gin.Context) {
 
 		_, err = db.BatchWriteItem(deleteInput)
 		if err != nil {
-			print(err)
 			c.Status(500)
 			return
 		}
@@ -1382,6 +1380,45 @@ func shareFilesWithRecipients(c *gin.Context) {
 			}
 		}
 	}
+	c.Status(200)
+}
+
+func unshareFilesWithRecipient(c *gin.Context) {
+
+	type SharedInfoToDelete struct {
+		Email    string `json:"recipientEmail"`
+		FileName string `json:"fileName"`
+	}
+
+	var sharedInfo SharedInfoToDelete
+
+	err := c.BindJSON(&sharedInfo)
+
+	if err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String("shares_data"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"recipientEmail": {S: aws.String(sharedInfo.Email)},
+			"fileName":       {S: aws.String(sharedInfo.FileName)},
+		},
+	}
+
+	_, err = db.DeleteItem(input)
+	if err != nil {
+		c.Status(500)
+		return
+	}
+
 	c.Status(200)
 }
 
@@ -1639,6 +1676,63 @@ func retrieveEncAESKeys(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"files": resultMap})
 }
 
+func usersSharedWith(c *gin.Context) {
+	fmt.Println("we inside")
+	email, exists := c.Get("email")
+	if !exists {
+		c.Status(401)
+		return
+	}
+
+	type File struct {
+		FileName string `json:"filename"`
+	}
+
+	var acceptedFile File
+	if err := c.BindJSON(&acceptedFile); err != nil {
+		c.Status(400)
+		return
+	}
+
+	db, err := initDynamoDB()
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	input := &dynamodb.ScanInput{
+		TableName:        aws.String("shares_data"),
+		FilterExpression: aws.String("fileName = :fileName"),
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":fileName": {S: aws.String(acceptedFile.FileName)},
+		},
+		ProjectionExpression: aws.String("recipientEmail, ownerEmail"),
+	}
+
+	result, err := db.Scan(input)
+	if err != nil {
+		fmt.Println(err)
+		c.Status(500)
+		return
+	}
+
+	users := make([]string, 0)
+
+	for _, item := range result.Items {
+		if item != nil {
+			recAttr, ok1 := item["recipientEmail"]
+			ownAttr, ok2 := item["ownerEmail"]
+			if ok1 && ok2 && recAttr.S != nil && ownAttr.S != nil {
+				if *ownAttr.S == email {
+					users = append(users, *recAttr.S)
+				}
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"users": users})
+}
+
 func main() {
 	fmt.Println("Starting server on port 8080...")
 	router := gin.Default()
@@ -1666,6 +1760,8 @@ func main() {
 	router.POST("/users/exists", AuthMiddleware(), verifyUserExists)
 	router.POST("/users/public-keys", AuthMiddleware(), obtainPublicKeys)
 	router.POST("/users/files/share", AuthMiddleware(), shareFilesWithRecipients)
+	router.DELETE("/users/files/unshare", AuthMiddleware(), unshareFilesWithRecipient)
+	router.POST("/users/files/shared-with", AuthMiddleware(), usersSharedWith)
 	router.GET("/users/files/inbox", AuthMiddleware(), retrieveInboxFiles)
 	router.POST("/users/files/inbox", AuthMiddleware(), acceptInboxFiles)
 	router.DELETE("/users/files/inbox", AuthMiddleware(), deleteInboxFiles)
